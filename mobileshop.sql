@@ -3,7 +3,7 @@
 -- https://www.phpmyadmin.net/
 --
 -- Хост: 127.0.0.1
--- Время создания: Окт 18 2025 г., 17:42
+-- Время создания: Окт 18 2025 г., 20:03
 -- Версия сервера: 10.4.32-MariaDB
 -- Версия PHP: 8.2.12
 
@@ -180,6 +180,13 @@ CREATE TABLE `chat_logs` (
   `ip_address` varchar(45) NOT NULL,
   `created_at` timestamp NOT NULL DEFAULT current_timestamp()
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+--
+-- Дамп данных таблицы `chat_logs`
+--
+
+INSERT INTO `chat_logs` (`id`, `user_id`, `user_message`, `bot_response`, `ip_address`, `created_at`) VALUES
+(1, 9, 'как подобрать телефон?', 'Чтобы подобрать телефон:\n\n1. Определите бюджет\n2. Выберите нужный размер экрана\n3. Решите, какая камера важнее\n4. Определитесь с объемом памяти\n5. Посмотрите отзывы о моделях\n\nМогу помочь с конкретными критериями!', '::1', '2025-10-18 17:23:43');
 
 -- --------------------------------------------------------
 
@@ -412,7 +419,25 @@ INSERT INTO `product_views` (`id`, `user_id`, `session_id`, `product_type`, `pro
 (59, NULL, '3st44ogognv23o2m0dut5kc1pt', 'smartphone', 2, '2025-10-15 19:00:09'),
 (60, 9, '3st44ogognv23o2m0dut5kc1pt', 'smartphone', 10, '2025-10-15 19:06:25'),
 (61, 20, '3st44ogognv23o2m0dut5kc1pt', 'smartphone', 2, '2025-10-15 20:55:50'),
-(62, 20, '3st44ogognv23o2m0dut5kc1pt', 'smartphone', 3, '2025-10-15 21:23:09');
+(62, 20, '3st44ogognv23o2m0dut5kc1pt', 'smartphone', 3, '2025-10-15 21:23:09'),
+(64, 9, '6aqkr9a41266abv397j8sbifeh', 'smartphone', 2, '2025-10-18 17:08:31'),
+(65, 9, '6aqkr9a41266abv397j8sbifeh', 'smartphone', 10, '2025-10-18 17:08:38'),
+(66, 9, '6aqkr9a41266abv397j8sbifeh', 'smartphone', 10, '2025-10-18 17:11:30'),
+(67, 9, '6aqkr9a41266abv397j8sbifeh', 'smartphone', 10, '2025-10-18 17:11:48'),
+(68, 25, '6aqkr9a41266abv397j8sbifeh', 'smartphone', 10, '2025-10-18 17:18:24'),
+(69, 9, 'dn91u0hfvi4si1lo6ebo5e29b1', 'smartphone', 3, '2025-10-18 17:19:53'),
+(70, 9, 'dn91u0hfvi4si1lo6ebo5e29b1', 'smartphone', 1, '2025-10-18 17:26:24'),
+(71, 9, 'dn91u0hfvi4si1lo6ebo5e29b1', 'smartphone', 1, '2025-10-18 17:26:56'),
+(72, 9, 'dn91u0hfvi4si1lo6ebo5e29b1', 'smartphone', 1, '2025-10-18 17:27:46'),
+(73, 9, 'dn91u0hfvi4si1lo6ebo5e29b1', 'smartphone', 6, '2025-10-18 17:27:52'),
+(74, 9, 'dn91u0hfvi4si1lo6ebo5e29b1', 'smartphone', 6, '2025-10-18 17:28:00'),
+(75, 9, 'dn91u0hfvi4si1lo6ebo5e29b1', 'smartphone', 6, '2025-10-18 17:28:31'),
+(76, 9, 'ud1rl7a3g0b3nfdubns5m92pdd', 'smartphone', 10, '2025-10-18 17:34:40'),
+(77, 9, 'ud1rl7a3g0b3nfdubns5m92pdd', 'smartphone', 10, '2025-10-18 17:34:55'),
+(78, 9, 'ud1rl7a3g0b3nfdubns5m92pdd', 'smartphone', 11, '2025-10-18 17:35:32'),
+(79, 9, 'ud1rl7a3g0b3nfdubns5m92pdd', 'smartphone', 11, '2025-10-18 17:35:48'),
+(80, 9, 'ud1rl7a3g0b3nfdubns5m92pdd', 'smartphone', 11, '2025-10-18 17:53:20'),
+(81, 9, 'ud1rl7a3g0b3nfdubns5m92pdd', 'smartphone', 11, '2025-10-18 17:59:04');
 
 -- --------------------------------------------------------
 
@@ -451,6 +476,51 @@ CREATE TABLE `recommendations` (
   `smartphone_id` int(11) NOT NULL,
   `recommended_smartphone_id` int(11) NOT NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8 COLLATE=utf8_general_ci;
+
+-- --------------------------------------------------------
+
+--
+-- Структура таблицы `reviews`
+--
+
+CREATE TABLE `reviews` (
+  `id` int(11) NOT NULL,
+  `smartphone_id` int(11) NOT NULL,
+  `user_id` int(11) NOT NULL,
+  `rating` tinyint(4) NOT NULL,
+  `title` varchar(200) DEFAULT NULL COMMENT 'Заголовок отзыва',
+  `comment` text NOT NULL,
+  `pros` text DEFAULT NULL COMMENT 'Достоинства',
+  `cons` text DEFAULT NULL COMMENT 'Недостатки',
+  `is_verified_purchase` tinyint(1) DEFAULT 0,
+  `likes_count` int(11) DEFAULT 0,
+  `created_at` timestamp NOT NULL DEFAULT current_timestamp(),
+  `updated_at` timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp(),
+  `is_approved` tinyint(1) DEFAULT 1
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+--
+-- Дамп данных таблицы `reviews`
+--
+
+INSERT INTO `reviews` (`id`, `smartphone_id`, `user_id`, `rating`, `title`, `comment`, `pros`, `cons`, `is_verified_purchase`, `likes_count`, `created_at`, `updated_at`, `is_approved`) VALUES
+(1, 12, 10, 4, 'Круто', 'Хороший телефон за свои деньги', 'Железо', 'Камеры', 0, 0, '2025-10-15 21:32:13', '2025-10-15 21:32:13', 1),
+(2, 10, 9, 4, '23423432', '342222222222222', '23444444444444444444', '234444444444444444444', 0, 0, '2025-10-18 17:34:55', '2025-10-18 17:34:55', 1),
+(3, 11, 9, 4, 'sdddddddddddddd', 'sdddddddddddddddd', 'dsssssssssf', 'fffffffffffffffffffffffggggggggggggggg', 0, 0, '2025-10-18 17:35:48', '2025-10-18 17:35:48', 1);
+
+-- --------------------------------------------------------
+
+--
+-- Структура таблицы `review_likes`
+--
+
+CREATE TABLE `review_likes` (
+  `id` int(11) NOT NULL,
+  `review_id` int(11) NOT NULL,
+  `user_id` int(11) NOT NULL,
+  `is_helpful` tinyint(1) DEFAULT 1,
+  `created_at` timestamp NOT NULL DEFAULT current_timestamp()
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
 -- --------------------------------------------------------
 
@@ -585,9 +655,9 @@ CREATE TABLE `users` (
 --
 
 INSERT INTO `users` (`id`, `login`, `email`, `password`, `full_name`, `photo`, `birth_date`, `is_admin`, `created_at`, `is_subscribed`, `last_login`) VALUES
-(9, 'Admin3', '', '$2y$10$8N..CwjS61AP7OgU2v7LeOxbcOAmvxsuhvpmUa4CtO326aSdrQM5u', 'Qwerty', NULL, '2001-05-23', 1, '2025-10-15 19:06:22', 1, '2025-10-18 17:37:41'),
+(9, 'Admin3', '', '$2y$10$8N..CwjS61AP7OgU2v7LeOxbcOAmvxsuhvpmUa4CtO326aSdrQM5u', 'Qwerty', NULL, '2001-05-23', 1, '2025-10-15 19:06:22', 1, '2025-10-18 20:34:36'),
 (20, 'User24', 'dxddxd137@gmail.com', '$2y$10$wEFj7kz8TuvHDRvgURB8l.HEt21kJkhEULl69pTf56UhIr59vfqsW', 'qeqeqwe', NULL, '2001-04-23', 0, '2025-10-15 20:48:46', 1, NULL),
-(25, 'User28', 'mtest8557@gmail.com', '$2y$10$e.pcHucaFVp7jAQvZmCcnuV.Tui4mSNlZKjSnrWcmHhqBzwbgR3DO', 'User', NULL, '2000-08-23', 0, '2025-10-18 10:39:25', 1, NULL);
+(25, 'User28', 'mtest8557@gmail.com', '$2y$10$e.pcHucaFVp7jAQvZmCcnuV.Tui4mSNlZKjSnrWcmHhqBzwbgR3DO', 'User', NULL, '2000-08-23', 0, '2025-10-18 10:39:25', 1, '2025-10-18 20:13:49');
 
 --
 -- Индексы сохранённых таблиц
@@ -694,6 +764,22 @@ ALTER TABLE `recommendations`
   ADD KEY `recommended_smartphone_id` (`recommended_smartphone_id`);
 
 --
+-- Индексы таблицы `reviews`
+--
+ALTER TABLE `reviews`
+  ADD PRIMARY KEY (`id`),
+  ADD KEY `smartphone_id` (`smartphone_id`),
+  ADD KEY `user_id` (`user_id`);
+
+--
+-- Индексы таблицы `review_likes`
+--
+ALTER TABLE `review_likes`
+  ADD PRIMARY KEY (`id`),
+  ADD UNIQUE KEY `unique_like` (`review_id`,`user_id`),
+  ADD KEY `user_id` (`user_id`);
+
+--
 -- Индексы таблицы `smartphones`
 --
 ALTER TABLE `smartphones`
@@ -746,7 +832,7 @@ ALTER TABLE `categories`
 -- AUTO_INCREMENT для таблицы `chat_logs`
 --
 ALTER TABLE `chat_logs`
-  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT;
+  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=2;
 
 --
 -- AUTO_INCREMENT для таблицы `coupons`
@@ -782,13 +868,25 @@ ALTER TABLE `order_items`
 -- AUTO_INCREMENT для таблицы `product_views`
 --
 ALTER TABLE `product_views`
-  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=64;
+  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=82;
 
 --
 -- AUTO_INCREMENT для таблицы `promotions`
 --
 ALTER TABLE `promotions`
   MODIFY `id` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=11;
+
+--
+-- AUTO_INCREMENT для таблицы `reviews`
+--
+ALTER TABLE `reviews`
+  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=4;
+
+--
+-- AUTO_INCREMENT для таблицы `review_likes`
+--
+ALTER TABLE `review_likes`
+  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT;
 
 --
 -- AUTO_INCREMENT для таблицы `smartphones`
@@ -882,6 +980,13 @@ ALTER TABLE `order_items`
 --
 ALTER TABLE `product_views`
   ADD CONSTRAINT `product_views_ibfk_1` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE;
+
+--
+-- Ограничения внешнего ключа таблицы `review_likes`
+--
+ALTER TABLE `review_likes`
+  ADD CONSTRAINT `review_likes_ibfk_1` FOREIGN KEY (`review_id`) REFERENCES `reviews` (`id`) ON DELETE CASCADE,
+  ADD CONSTRAINT `review_likes_ibfk_2` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE;
 
 --
 -- Ограничения внешнего ключа таблицы `smartphone_images`
