@@ -3,6 +3,24 @@ session_start();
 require_once __DIR__ . '/inc/header.php';
 require_once __DIR__ . '/inc/db.php';
 
+// Вывод сообщений об ошибках/успехе
+if (isset($_SESSION['error'])) {
+    echo '<div class="alert alert-danger alert-dismissible fade show" role="alert">
+            ' . htmlspecialchars($_SESSION['error']) . '
+            <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+          </div>';
+    unset($_SESSION['error']);
+}
+
+if (isset($_SESSION['success'])) {
+    echo '<div class="alert alert-success alert-dismissible fade show" role="alert">
+            ' . htmlspecialchars($_SESSION['success']) . '
+            <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+          </div>';
+    unset($_SESSION['success']);
+}
+// завершение вывода сообщений об ошибках/успехе
+
 if (!isset($_GET['id']) || !is_numeric($_GET['id'])) {
     echo "<div class='container'><h2>Ошибка: Товар не найден.</h2></div>";
     require_once __DIR__ . '/inc/footer.php';
@@ -254,5 +272,230 @@ if ($recSmartResult->num_rows > 0):
 <?php
 endif;
 
+// Подключаем модель отзывов
+require_once __DIR__ . '/models/Review.php';
+$reviewModel = new Review($db);
+
+// ИСПРАВЛЕНИЕ: используем $_SESSION['id'] вместо $_SESSION['user_id']
+$current_user_id = isset($_SESSION['id']) ? $_SESSION['id'] : null;
+
+// Получаем данные об отзывах для этого смартфона
+$average_rating = $reviewModel->getAverageRating($product_id);
+$reviews = $reviewModel->getSmartphoneReviews($product_id);
+$has_reviewed = $current_user_id ? $reviewModel->hasUserReviewed($product_id, $current_user_id) : false;
+?>
+
+<!-- Блок рейтинга и отзывов -->
+<div class="reviews-section mt-5">
+    <h3>Отзывы о товаре</h3>
+    
+    <!-- Общий рейтинг -->
+    <div class="rating-summary mb-4 p-4 border rounded">
+        <div class="row align-items-center">
+            <div class="col-md-4 text-center">
+                <div class="average-rating">
+                    <h2 class="text-primary mb-0"><?= number_format($average_rating['avg_rating'] ?? 0, 1) ?></h2>
+                    <div class="rating-stars mb-2">
+                        <?php for($i = 1; $i <= 5; $i++): ?>
+                            <span class="star <?= $i <= round($average_rating['avg_rating'] ?? 0) ? 'filled' : '' ?>">★</span>
+                        <?php endfor; ?>
+                    </div>
+                    <span class="text-muted"><?= $average_rating['total_reviews'] ?? 0 ?> отзывов</span>
+                </div>
+            </div>
+            <div class="col-md-8">
+                <!-- Распределение по звездам -->
+                <?php for($i = 5; $i >= 1; $i--): ?>
+                    <?php 
+                    $rating_count = $average_rating["rating_$i"] ?? 0; 
+                    $total_reviews = $average_rating['total_reviews'] ?? 1;
+                    $percentage = $total_reviews > 0 ? ($rating_count / $total_reviews) * 100 : 0;
+                    ?>
+                    <div class="rating-bar mb-2">
+                        <div class="d-flex align-items-center">
+                            <span class="me-2"><?= $i ?> ★</span>
+                            <div class="progress flex-grow-1" style="height: 8px;">
+                                <div class="progress-bar" style="width: <?= $percentage ?>%"></div>
+                            </div>
+                            <span class="ms-2 text-muted"><?= $rating_count ?></span>
+                        </div>
+                    </div>
+                <?php endfor; ?>
+            </div>
+        </div>
+    </div>
+
+    <!-- Форма добавления отзыва -->
+    <?php if($current_user_id && !$has_reviewed): ?>
+    <div class="review-form mb-5">
+        <h4>Оставить отзыв</h4>
+        <form method="POST" action="add_review.php">
+            <input type="hidden" name="smartphone_id" value="<?= $product_id ?>">
+            <input type="hidden" name="user_id" value="<?= $current_user_id ?>">
+            
+            <!-- Оценка -->
+            <div class="mb-3">
+                <label class="form-label">Ваша оценка *</label>
+                <div class="rating-input">
+                    <?php for($i = 5; $i >= 1; $i--): ?>
+                        <input type="radio" id="star<?= $i ?>" name="rating" value="<?= $i ?>" required>
+                        <label for="star<?= $i ?>">★</label>
+                    <?php endfor; ?>
+                </div>
+            </div>
+            
+            <!-- Заголовок -->
+            <div class="mb-3">
+                <label for="title" class="form-label">Заголовок отзыва *</label>
+                <input type="text" class="form-control" id="title" name="title" required placeholder="Кратко опишите ваше впечатление">
+            </div>
+            
+            <!-- Комментарий -->
+            <div class="mb-3">
+                <label for="comment" class="form-label">Подробный отзыв *</label>
+                <textarea class="form-control" id="comment" name="comment" rows="4" required placeholder="Расскажите о вашем опыте использования товара"></textarea>
+            </div>
+            
+            <!-- Плюсы и минусы -->
+            <div class="row">
+                <div class="col-md-6">
+                    <div class="mb-3">
+                        <label for="pros" class="form-label">Достоинства</label>
+                        <textarea class="form-control" id="pros" name="pros" rows="3" placeholder="Что вам понравилось?"></textarea>
+                    </div>
+                </div>
+                <div class="col-md-6">
+                    <div class="mb-3">
+                        <label for="cons" class="form-label">Недостатки</label>
+                        <textarea class="form-control" id="cons" name="cons" rows="3" placeholder="Что можно улучшить?"></textarea>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Подтверждение покупки -->
+            <div class="mb-3 form-check">
+                <input type="checkbox" class="form-check-input" id="is_verified" name="is_verified" value="1">
+                <label class="form-check-label" for="is_verified">Подтверждаю, что покупал этот товар</label>
+            </div>
+            
+            <button type="submit" class="btn btn-primary">Опубликовать отзыв</button>
+        </form>
+    </div>
+    <?php elseif(!$current_user_id): ?>
+        <div class="alert alert-info">
+            <a href="auth.php" class="alert-link">Войдите</a>, чтобы оставить отзыв
+        </div>
+    <?php endif; ?>
+
+    <!-- Список отзывов -->
+    <div class="reviews-list">
+        <h4>Отзывы покупателей</h4>
+        <?php if(empty($reviews)): ?>
+            <p class="text-muted">Пока нет отзывов на этот товар. Будьте первым!</p>
+        <?php else: ?>
+            <?php foreach($reviews as $review): ?>
+            <div class="review-item border-bottom pb-3 mb-3">
+                <div class="d-flex justify-content-between align-items-start mb-2">
+                    <div>
+                        <strong><?= htmlspecialchars($review['full_name'] ?: $review['login']) ?></strong>
+                        <?php if($review['is_verified_purchase']): ?>
+                            <span class="badge bg-success ms-2">✓ Проверенная покупка</span>
+                        <?php endif; ?>
+                        <div class="rating-stars small">
+                            <?php for($i = 1; $i <= 5; $i++): ?>
+                                <span class="star <?= $i <= $review['rating'] ? 'filled' : '' ?>">★</span>
+                            <?php endfor; ?>
+                        </div>
+                    </div>
+                    <small class="text-muted"><?= date('d.m.Y', strtotime($review['created_at'])) ?></small>
+                </div>
+                
+                <h6 class="fw-bold"><?= htmlspecialchars($review['title']) ?></h6>
+                <p class="mb-2"><?= nl2br(htmlspecialchars($review['comment'])) ?></p>
+                
+                <?php if(!empty($review['pros']) || !empty($review['cons'])): ?>
+                <div class="row mt-2">
+                    <?php if(!empty($review['pros'])): ?>
+                    <div class="col-md-6">
+                        <div class="pros-box p-2 bg-success bg-opacity-10 rounded">
+                            <strong>👍 Достоинства:</strong>
+                            <p class="mb-0"><?= nl2br(htmlspecialchars($review['pros'])) ?></p>
+                        </div>
+                    </div>
+                    <?php endif; ?>
+                    
+                    <?php if(!empty($review['cons'])): ?>
+                    <div class="col-md-6">
+                        <div class="cons-box p-2 bg-danger bg-opacity-10 rounded">
+                            <strong>👎 Недостатки:</strong>
+                            <p class="mb-0"><?= nl2br(htmlspecialchars($review['cons'])) ?></p>
+                        </div>
+                    </div>
+                    <?php endif; ?>
+                </div>
+                <?php endif; ?>
+                
+                <!-- Блок лайков -->
+                <div class="mt-2">
+                    <small class="text-muted">
+                        Отзыв полезен? 
+                        <?php if($current_user_id): ?>
+                            <a href="like_review.php?review_id=<?= $review['id'] ?>&helpful=1" class="text-decoration-none">Да</a> 
+                            (<?= $review['likes_count'] ?>)
+                        <?php else: ?>
+                            <span>Да (<?= $review['likes_count'] ?>)</span>
+                        <?php endif; ?>
+                    </small>
+                </div>
+            </div>
+            <?php endforeach; ?>
+        <?php endif; ?>
+    </div>
+</div>
+
+<style>
+.rating-stars .star {
+    color: #ddd;
+    font-size: 1.2em;
+}
+
+.rating-stars .star.filled {
+    color: #ffc107;
+}
+
+.rating-input {
+    display: flex;
+    flex-direction: row-reverse;
+    justify-content: flex-end;
+    gap: 5px;
+}
+
+.rating-input input {
+    display: none;
+}
+
+.rating-input label {
+    font-size: 1.5em;
+    color: #ddd;
+    cursor: pointer;
+    transition: color 0.2s;
+}
+
+.rating-input input:checked ~ label,
+.rating-input label:hover,
+.rating-input label:hover ~ label {
+    color: #ffc107;
+}
+
+.rating-stars.small .star {
+    font-size: 1em;
+}
+
+.progress-bar {
+    background-color: #28a745;
+}
+</style>
+
+<?php
 require_once __DIR__ . '/inc/footer.php';
 ?>
