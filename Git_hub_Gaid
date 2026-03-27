@@ -1,0 +1,227 @@
+Работа с репозиториями
+Клонирование существующего репозитория
+Скопируйте URL репозитория с GitHub (Code → HTTPS/SSH)
+
+В VS Code: Ctrl+Shift+P → Git: Clone → вставьте URL → выберите папку
+
+
+Создание нового репозитория
+bash
+# Инициализировать локальный репозиторий
+git init
+
+# Связать с удаленным репозиторием
+git remote add origin https://github.com/username/repo.git
+Работа с ветками
+Просмотр веток
+bash
+# Локальные ветки
+git branch
+
+# Все ветки (локальные + удаленные)
+git branch -a
+
+# Только удаленные ветки
+git branch -r
+
+# Ветки с последними коммитами
+git branch -v
+Создание ветки
+bash
+# Создать ветку (оставаясь на текущей)
+git branch branch-name
+
+# Создать и переключиться на новую ветку
+git checkout -b branch-name
+Переключение между ветками
+bash
+# Переключиться на ветку
+git checkout branch-name
+
+# Или через VS Code: клик на название ветки в левом нижнем углу
+Удаление ветки
+bash
+# Удалить локальную ветку
+git branch -d branch-name
+
+# Удалить ветку на GitHub
+git push origin --delete branch-name
+Основные операции (Commit, Push, Pull)
+Стандартный рабочий процесс
+bash
+# 1. Посмотреть изменения
+git status
+
+# 2. Добавить файлы в индекс (staging)
+git add .                    # все файлы
+git add file.php             # конкретный файл
+git add *.php                # все PHP файлы
+
+# 3. Создать коммит
+git commit -m "Описание изменений"
+
+# 4. Отправить на GitHub
+git push origin branch-name
+
+# 5. Получить изменения с GitHub
+git pull origin branch-name
+Сокращенные команды
+bash
+# Добавить и закоммитить все измененные (не новые!) файлы
+git commit -am "Message"
+
+# Отправить текущую ветку (если upstream настроен)
+git push
+Слияние веток (Merge)
+Простое слияние
+bash
+# 1. Переключиться на целевую ветку (куда вливаем)
+git checkout main
+
+# 2. Обновить целевую ветку
+git pull origin main
+
+# 3. Выполнить слияние
+git merge source-branch
+
+# 4. Отправить результат
+git push origin main
+Слияние с опцией allow-unrelated-histories
+bash
+# Если ветки не имеют общей истории
+git merge source-branch --allow-unrelated-histories
+Решение конфликтов
+Просмотр конфликтующих файлов
+bash
+git status
+git diff --name-only --diff-filter=U
+Решение через VS Code
+Откройте конфликтующий файл
+
+Используйте кнопки:
+
+Accept Current Change — оставить из текущей ветки
+
+Accept Incoming Change — оставить из вливаемой ветки
+
+Accept Both Changes — оставить оба варианта
+
+Сохраните файл
+
+Добавьте файл в индекс: git add file.php
+
+Решение командной строкой
+bash
+# Для одного файла: взять версию из текущей ветки
+git checkout --ours -- file.php
+
+# Для одного файла: взять версию из вливаемой ветки
+git checkout --theirs -- file.php
+
+# Для всех конфликтующих файлов: взять версию из theirs
+git checkout --theirs .
+Завершение слияния после разрешения конфликтов
+bash
+git add .
+git commit -m "Resolved merge conflicts"
+git push origin main
+Отмена слияния
+bash
+git merge --abort
+Удаление файлов
+Удаление файлов из репозитория
+bash
+# Удалить файл из Git и с диска
+git rm file.txt
+
+# Удалить папку рекурсивно
+git rm -r folder/
+
+# Удалить из Git, но оставить на диске
+git rm --cached file.txt
+Работа с файлами, содержащими пробелы или русские символы
+bash
+# Использовать кавычки
+git rm "база данных.sql"
+
+# Или экранировать пробел
+git rm база\ данных.sql
+Удаление через VS Code
+Клик правой кнопкой по файлу → Delete
+
+В Source Control (Ctrl+Shift+G) закоммитить изменения
+
+После удаления
+bash
+git add -A
+git commit -m "Remove unwanted files"
+git push origin main
+Создание .gitignore
+bash
+# Создать файл .gitignore
+echo ".idea/" >> .gitignore
+echo "*.log" >> .gitignore
+echo "*.sql" >> .gitignore
+echo "test_bot/" >> .gitignore
+
+# Добавить в репозиторий
+git add .gitignore
+git commit -m "Add .gitignore"
+git push origin main
+Полезные команды
+Просмотр изменений
+bash
+# Статус изменений
+git status
+
+# Различия между текущим и закоммиченным
+git diff
+
+# Различия между ветками
+git diff main..feature
+
+# Показать только имена измененных файлов
+git diff --name-only
+История коммитов
+bash
+# История коммитов
+git log
+
+# Сокращенная история
+git log --oneline
+
+# Граф веток
+git log --graph --oneline --all
+Работа с удаленным репозиторием
+bash
+# Показать удаленные репозитории
+git remote -v
+
+# Добавить удаленный репозиторий
+git remote add origin URL
+
+# Изменить URL удаленного репозитория
+git remote set-url origin NEW_URL
+Отмена изменений
+bash
+# Отменить изменения в файле (до git add)
+git checkout -- file.php
+
+# Убрать файл из индекса (после git add, до commit)
+git reset HEAD file.php
+
+# Отменить последний коммит (оставить изменения)
+git reset --soft HEAD~1
+
+# Отменить последний коммит (удалить изменения)
+git reset --hard HEAD~1
+Резервное копирование перед опасными операциями
+bash
+# Создать бэкап ветки
+git checkout main
+git checkout -b main-backup
+git push origin main-backup
+Частые ошибки и их решения
+Ошибка: refusing to merge unrelated histories
+bash
+git merge branch-name --allow-unrelated-histories
