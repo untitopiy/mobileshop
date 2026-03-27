@@ -22,4 +22,17 @@ if (!$is_admin) {
     echo "<div class='container'><h2>Доступ запрещен. Вы не являетесь администратором.</h2></div>";
     exit;
 }
+
+// Дополнительная функция для проверки прав
+function checkAdminAccess($db) {
+    if (!isset($_SESSION['id'])) return false;
+    $user_id = $_SESSION['id'];
+    $stmt = $db->prepare("SELECT is_admin FROM users WHERE id = ?");
+    $stmt->bind_param("i", $user_id);
+    $stmt->execute();
+    $stmt->bind_result($is_admin);
+    $stmt->fetch();
+    $stmt->close();
+    return $is_admin;
+}
 ?>

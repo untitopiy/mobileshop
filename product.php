@@ -2,6 +2,24 @@
 session_start();
 require_once __DIR__ . '/inc/header.php';
 require_once __DIR__ . '/inc/db.php';
+require_once __DIR__ . '/models/Review.php';
+
+// Вывод сообщений об ошибках/успехе
+if (isset($_SESSION['error'])) {
+    echo '<div class="alert alert-danger alert-dismissible fade show" role="alert">
+            ' . htmlspecialchars($_SESSION['error']) . '
+            <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+          </div>';
+    unset($_SESSION['error']);
+}
+
+if (isset($_SESSION['success'])) {
+    echo '<div class="alert alert-success alert-dismissible fade show" role="alert">
+            ' . htmlspecialchars($_SESSION['success']) . '
+            <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+          </div>';
+    unset($_SESSION['success']);
+}
 
 if (!isset($_GET['id']) || !is_numeric($_GET['id'])) {
     echo "<div class='container'><h2>Ошибка: Товар не найден.</h2></div>";
@@ -11,13 +29,18 @@ if (!isset($_GET['id']) || !is_numeric($_GET['id'])) {
 
 $product_id = (int)$_GET['id'];
 
+// Получаем информацию о товаре
 $query = $db->prepare("
-    SELECT s.id, s.name, s.brand, s.model, s.price, s.stock, s.description, 
-           sp.screen_size, sp.resolution, sp.processor, sp.ram, sp.storage, sp.battery_capacity, 
-           sp.camera_main, sp.camera_front, sp.os, sp.color, sp.weight 
-    FROM smartphones s
-    LEFT JOIN smartphone_specs sp ON s.id = sp.smartphone_id
-    WHERE s.id = ?
+    SELECT p.id, p.name, p.sku, p.short_description, p.description, 
+           p.brand, p.model, p.type, p.seller_id,
+           s.shop_name as seller_name, s.rating as seller_rating,
+           c.id as category_id, c.name as category_name,
+           p.price, p.meta_title, p.meta_description, p.views_count, p.sales_count,
+           p.rating as product_rating, p.reviews_count
+    FROM products p
+    LEFT JOIN sellers s ON s.id = p.seller_id
+    LEFT JOIN categories c ON c.id = p.category_id
+    WHERE p.id = ? AND p.status = 'active'
 ");
 $query->bind_param('i', $product_id);
 $query->execute();
@@ -29,230 +52,629 @@ if (!$product) {
     exit;
 }
 
-$image_query = $db->prepare("SELECT image_url FROM smartphone_images WHERE smartphone_id = ?");
-$image_query->bind_param('i', $product_id);
-$image_query->execute();
-$image_result = $image_query->get_result();
-$images = $image_result->fetch_all(MYSQLI_ASSOC);
+// Получаем варианты товара
+$variations_query = $db->prepare("
+    SELECT id, sku, price, old_price, quantity, image_url
+    FROM product_variations
+    WHERE product_id = ? AND quantity > 0
+    ORDER BY price ASC
+");
+$variations_query->bind_param('i', $product_id);
+$variations_query->execute();
+$variations = $variations_query->get_result()->fetch_all(MYSQLI_ASSOC);
 
-$session_id = session_id();
-$user_id = isset($_SESSION['id']) ? $_SESSION['id'] : null;
-$insert_view = $db->prepare("INSERT INTO product_views (user_id, session_id, product_type, product_id) VALUES (?, ?, 'smartphone', ?)");
-$insert_view->bind_param("isi", $user_id, $session_id, $product_id);
-$insert_view->execute();
-
-$promo_stmt = $db->prepare("
-    SELECT discount_percent
-    FROM promotions
-    WHERE product_type = 'smartphone'
-      AND product_id = ?
-      AND is_active = 1
-      AND start_date <= CURDATE()
-      AND (end_date >= CURDATE() OR end_date IS NULL)
+// --- РАСЧЕТ СКИДОК И ЦЕН ---
+$current_time = date('Y-m-d H:i:s');
+$promo_query = $db->prepare("
+    SELECT prom.name, prom.type, prom.value, pp.discount_percent
+    FROM promotions prom
+    JOIN promotion_products pp ON pp.promotion_id = prom.id
+    WHERE pp.product_id = ? 
+    AND prom.is_active = 1 
+    AND (prom.starts_at <= ? OR prom.starts_at IS NULL)
+    AND (prom.expires_at >= ? OR prom.expires_at IS NULL)
     LIMIT 1
 ");
-$promo_stmt->bind_param('i', $product_id);
-$promo_stmt->execute();
-$promo = $promo_stmt->get_result()->fetch_assoc();
+$promo_query->bind_param('iss', $product_id, $current_time, $current_time);
+$promo_query->execute();
+$promo_res = $promo_query->get_result()->fetch_assoc();
+
+// Базовая цена (берем минимальную из вариаций или из товара)
+$base_price = !empty($variations) ? (float)min(array_column($variations, 'price')) : (float)$product['price'];
+
+$final_price = $base_price;
+$old_price = null;
+
+if ($promo_res) {
+    $old_price = $base_price;
+    $discount_amount = ($promo_res['discount_percent'] > 0) ? $promo_res['discount_percent'] : $promo_res['value'];
+    
+    if ($promo_res['type'] === 'percent' || $promo_res['discount_percent'] > 0) {
+        $final_price = $base_price * (1 - ($discount_amount / 100));
+    } else {
+        $final_price = $base_price - $discount_amount;
+    }
+}
+
+// Получаем изображения товара
+$images_query = $db->prepare("
+    SELECT image_url, is_primary, sort_order
+    FROM product_images
+    WHERE product_id = ?
+    ORDER BY is_primary DESC, sort_order ASC
+");
+$images_query->bind_param('i', $product_id);
+$images_query->execute();
+$images = $images_query->get_result()->fetch_all(MYSQLI_ASSOC);
+
+// Получаем характеристики товара
+$attributes_query = $db->prepare("
+    SELECT a.name, a.type, a.unit, 
+           pa.value_text, pa.value_number, pa.value_boolean
+    FROM product_attributes pa
+    JOIN attributes a ON a.id = pa.attribute_id
+    WHERE pa.product_id = ? AND a.is_visible_on_product = 1
+    ORDER BY a.sort_order
+");
+$attributes_query->bind_param('i', $product_id);
+$attributes_query->execute();
+$attributes = $attributes_query->get_result()->fetch_all(MYSQLI_ASSOC);
+
+// Получаем теги товара
+$tags_query = $db->prepare("
+    SELECT t.name, t.slug
+    FROM tags t
+    JOIN product_tags pt ON pt.tag_id = t.id
+    WHERE pt.product_id = ?
+");
+$tags_query->bind_param('i', $product_id);
+$tags_query->execute();
+$tags = $tags_query->get_result()->fetch_all(MYSQLI_ASSOC);
+
+// Записываем просмотр товара
+$session_id = session_id();
+$user_id = isset($_SESSION['id']) ? $_SESSION['id'] : null;
+
+$check_view = $db->prepare("
+    SELECT id FROM product_views 
+    WHERE user_id = ? AND session_id = ? AND product_id = ? 
+    AND DATE(viewed_at) = CURDATE()
+");
+$check_view->bind_param("isi", $user_id, $session_id, $product_id);
+$check_view->execute();
+$existing_view = $check_view->get_result()->fetch_assoc();
+
+if (!$existing_view) {
+    $insert_view = $db->prepare("
+        INSERT INTO product_views (user_id, session_id, product_id, viewed_at) 
+        VALUES (?, ?, ?, NOW())
+    ");
+    $insert_view->bind_param("isi", $user_id, $session_id, $product_id);
+    $insert_view->execute();
+    
+    $update_views = $db->prepare("UPDATE products SET views_count = views_count + 1 WHERE id = ?");
+    $update_views->bind_param('i', $product_id);
+    $update_views->execute();
+}
+
+// Получаем отзывы
+$reviewModel = new Review($db);
+$current_user_id = isset($_SESSION['id']) ? $_SESSION['id'] : null;
+$average_rating = $reviewModel->getAverageRating($product_id);
+$reviews = $reviewModel->getProductReviews($product_id, $current_user_id);
+$has_reviewed = $current_user_id ? $reviewModel->hasUserReviewed($product_id, $current_user_id) : false;
+
+$has_variations = count($variations) > 1;
 ?>
+
 <div class="container product-container">
-    <div class="product">
-        <div class="product-gallery">
-            <?php if (!empty($images)): ?>
-                <img id="main-image" src="<?= htmlspecialchars($images[0]['image_url']); ?>" alt="<?= htmlspecialchars($product['name']); ?>">
+    <nav aria-label="breadcrumb" class="my-3">
+        <ol class="breadcrumb">
+            <li class="breadcrumb-item"><a href="index.php">Главная</a></li>
+            <li class="breadcrumb-item"><a href="catalog.php?category=<?= $product['category_id'] ?>"><?= htmlspecialchars($product['category_name']) ?></a></li>
+            <li class="breadcrumb-item active" aria-current="page"><?= htmlspecialchars($product['name']) ?></li>
+        </ol>
+    </nav>
+
+    <div class="row product-wrapper mt-2">
+        
+        <div class="col-md-5 mb-4 product-gallery">
+            <div class="main-image-container mb-3 shadow-sm">
+                <?php if (!empty($images)): ?>
+                    <img id="main-image" src="<?= htmlspecialchars($images[0]['image_url']); ?>" 
+                         alt="<?= htmlspecialchars($product['name']); ?>" class="main-image">
+                <?php else: ?>
+                    <img src="assets/no-image.png" alt="Нет изображения" class="main-image">
+                <?php endif; ?>
+            </div>
+            
+            <?php if (!empty($images) && count($images) > 1): ?>
                 <div class="thumbnail-gallery">
                     <?php foreach ($images as $img): ?>
-                        <img src="<?= htmlspecialchars($img['image_url']); ?>" alt="Фото <?= htmlspecialchars($product['name']); ?>" onclick="changeImage(this)">
+                        <img src="<?= htmlspecialchars($img['image_url']); ?>" 
+                             alt="Фото <?= htmlspecialchars($product['name']); ?>" 
+                             onclick="changeImage(this)"
+                             class="<?= $img['is_primary'] ? 'primary' : '' ?>">
                     <?php endforeach; ?>
                 </div>
-            <?php else: ?>
-                <img src="assets/no-image.png" alt="Нет изображения">
             <?php endif; ?>
         </div>
-        <div class="product-info">
-            <h1><?= htmlspecialchars($product['brand'] . ' ' . $product['name']); ?></h1>
-            <?php if ($promo): 
-                $orig = (float)$product['price'];
-                $disc = (int)$promo['discount_percent'];
-                $new = $orig * (100 - $disc) / 100;
-            ?>
-                <p class="product-price">
-                    <del><?= number_format($orig, 0, ',', ' '); ?> руб.</del>
-                    <?= number_format($new, 0, ',', ' '); ?> руб.
-                    <span class="badge bg-danger">-<?= $disc; ?>%</span>
-                </p>
-            <?php else: ?>
-                <p class="product-price"><?= number_format($product['price'], 0, ',', ' '); ?> руб.</p>
+
+        <div class="col-md-7 product-info">
+            <div class="d-flex justify-content-between align-items-start mb-2">
+                <div>
+                    <h1><?= htmlspecialchars($product['brand'] . ' ' . $product['name']); ?></h1>
+                    <?php if (!empty($tags)): ?>
+                        <div class="mb-2">
+                            <?php foreach ($tags as $tag): ?>
+                                <span class="badge bg-info me-1">#<?= htmlspecialchars($tag['name']) ?></span>
+                            <?php endforeach; ?>
+                        </div>
+                    <?php endif; ?>
+                </div>
+                <span class="badge bg-secondary">Артикул: <?= htmlspecialchars($product['sku'] ?? '') ?></span>
+            </div>
+
+            <div class="product-rating mb-3">
+                <div class="d-flex align-items-center">
+                    <div class="rating-stars me-2">
+                        <?php for($i = 1; $i <= 5; $i++): ?>
+                            <span class="star <?= $i <= round($product['product_rating'] ?? 0) ? 'filled' : '' ?>">★</span>
+                        <?php endfor; ?>
+                    </div>
+                    <span class="me-2 fw-bold"><?= number_format($product['product_rating'] ?? 0, 1) ?></span>
+                    <a href="#reviews" class="text-muted">(<?= $product['reviews_count'] ?> отзывов)</a>
+                </div>
+            </div>
+
+            <?php if ($product['seller_id']): ?>
+                <div class="seller-info mb-3 p-2 bg-light rounded border">
+                    <div class="d-flex align-items-center">
+                        <i class="fas fa-store me-2 text-primary"></i>
+                        <span>Продавец: <strong><?= htmlspecialchars($product['seller_name']) ?></strong></span>
+                        <?php if ($product['seller_rating'] > 0): ?>
+                            <span class="ms-3 bg-white px-2 py-1 rounded border">
+                                <i class="fas fa-star text-warning"></i>
+                                <?= number_format($product['seller_rating'], 1) ?>
+                            </span>
+                        <?php endif; ?>
+                    </div>
+                </div>
             <?php endif; ?>
-            <p class="product-stock">В наличии: <?= $product['stock']; ?> шт.</p>
-            <p class="product-description"><?= nl2br(htmlspecialchars($product['description'])); ?></p>
-            <h3>Характеристики:</h3>
-            <ul class="product-specs">
-                <li><strong>Модель:</strong> <?= htmlspecialchars($product['model']); ?></li>
-                <li><strong>Экран:</strong> <?= htmlspecialchars($product['screen_size']); ?>" (<?= htmlspecialchars($product['resolution']); ?>)</li>
-                <li><strong>Процессор:</strong> <?= htmlspecialchars($product['processor']); ?></li>
-                <li><strong>ОЗУ:</strong> <?= htmlspecialchars($product['ram']); ?> ГБ</li>
-                <li><strong>Память:</strong> <?= htmlspecialchars($product['storage']); ?> ГБ</li>
-                <li><strong>Аккумулятор:</strong> <?= htmlspecialchars($product['battery_capacity']); ?> мАч</li>
-                <li><strong>Камера:</strong> <?= htmlspecialchars($product['camera_main']); ?></li>
-                <li><strong>Фронтальная камера:</strong> <?= htmlspecialchars($product['camera_front']); ?></li>
-                <li><strong>ОС:</strong> <?= htmlspecialchars($product['os']); ?></li>
-                <li><strong>Цвет:</strong> <?= htmlspecialchars($product['color']); ?></li>
-                <li><strong>Вес:</strong> <?= htmlspecialchars($product['weight']); ?> г</li>
-            </ul>
-            <form method="POST" action="cart.php" class="cart-form">
-                <input type="hidden" name="product_id" value="<?= $product_id; ?>">
-                <input type="number" name="quantity" min="1" max="<?= $product['stock']; ?>" value="1" class="quantity-input">
-                <button type="submit" class="btn btn-primary">Добавить в корзину</button>
-            </form>
+
+            <div class="product-price-section mb-4 shadow-sm">
+                <?php if (isset($old_price) && $old_price > $final_price): ?>
+                    <div class="d-flex align-items-center gap-2 mb-1">
+                        <span class="text-muted text-decoration-line-through fs-5" id="old-price-display">
+                            <?= number_format($old_price, 0, '.', ' ') ?> руб.
+                        </span>
+                        <span class="badge bg-danger">Акция <?= isset($promo_res['name']) ? htmlspecialchars($promo_res['name']) : '' ?></span>
+                    </div>
+                    <div class="text-danger fw-bold fs-1" id="current-price-display">
+                        <?= number_format($final_price, 0, '.', ' ') ?> руб.
+                    </div>
+                <?php else: ?>
+                    <div class="text-dark fw-bold fs-1" id="current-price-display">
+                        <?= number_format($base_price, 0, '.', ' ') ?> руб.
+                    </div>
+                <?php endif; ?>
+            </div>
+
+            <?php if (!empty($product['short_description'])): ?>
+                <div class="short-description mb-4">
+                    <p class="text-secondary"><?= nl2br(htmlspecialchars($product['short_description'])) ?></p>
+                </div>
+            <?php endif; ?>
+
+            <?php if ($has_variations): ?>
+                <div class="product-variations mb-4">
+                    <h5 class="mb-3">Выберите вариант:</h5>
+                    <div class="variations-list">
+                        <?php foreach ($variations as $variation): ?>
+                            <div class="variation-item rounded p-2 <?= $variation['quantity'] <= 0 ? 'out-of-stock' : '' ?>"
+                                 data-price="<?= $variation['price'] ?>"
+                                 data-variation-id="<?= $variation['id'] ?>"
+                                 data-stock="<?= $variation['quantity'] ?>"
+                                 onclick="selectVariation(this, <?= $variation['id'] ?>, <?= $variation['price'] ?>, <?= $variation['quantity'] ?>)">
+                                <div class="d-flex flex-column">
+                                    <strong><?= htmlspecialchars($variation['sku']) ?></strong>
+                                    <span class="badge mt-1 <?= $variation['quantity'] > 0 ? 'bg-success' : 'bg-secondary' ?> align-self-start">
+                                        <?= $variation['quantity'] > 0 ? 'В наличии: ' . $variation['quantity'] : 'Нет в наличии' ?>
+                                    </span>
+                                </div>
+                            </div>
+                        <?php endforeach; ?>
+                    </div>
+                </div>
+            <?php endif; ?>
+
+            <!-- 🔥 ОБНОВЛЁННАЯ ФОРМА: работает через AJAX вместо обычного submit -->
+            <div class="cart-form mb-4" id="add-to-cart-form">
+                <input type="hidden" id="product_id" value="<?= $product_id; ?>">
+                <input type="hidden" id="selected_variation" value="<?= $variations[0]['id'] ?? '' ?>">
+                
+                <div class="row g-2 align-items-center">
+                    <div class="col-auto">
+                        <label for="quantity" class="col-form-label fw-bold">Количество:</label>
+                    </div>
+                    <div class="col-auto">
+                        <input type="number" id="quantity" 
+                               min="1" max="<?= $variations[0]['quantity'] ?? 0 ?>" 
+                               value="1" class="form-control quantity-input form-control-lg" 
+                               style="width: 100px;" 
+                               <?= ($variations[0]['quantity'] ?? 0) <= 0 ? 'disabled' : '' ?>>
+                    </div>
+                    <div class="col-auto flex-grow-1">
+                        <button type="button" id="add-to-cart-btn" class="btn btn-primary btn-lg w-100 shadow-sm" 
+                                onclick="addToCartFromProduct()"
+                                <?= ($variations[0]['quantity'] ?? 0) <= 0 ? 'disabled' : '' ?>>
+                            <i class="fas fa-shopping-cart me-2"></i>Добавить в корзину
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <div class="product-actions mt-3 d-flex gap-2">
+                <button class="btn btn-outline-danger flex-grow-1" onclick="toggleWishlist(<?= $product_id ?>)">
+                    <i class="far fa-heart" id="wishlist-icon-<?= $product_id ?>"></i>
+                    <span id="wishlist-text-<?= $product_id ?>">В избранное</span>
+                </button>
+                <button class="btn btn-outline-secondary flex-grow-1" onclick="toggleCompare(<?= $product_id ?>)">
+                    <i class="fas fa-balance-scale"></i> Сравнить
+                </button>
+            </div>
+
+            <div class="social-share mb-2 mt-4 text-end">
+                <span class="me-2 text-muted small">Поделиться:</span>
+                <a href="#" onclick="window.open('https://vk.com/share.php?url='+encodeURIComponent(window.location.href), '_blank')" class="btn btn-sm btn-outline-primary me-1"><i class="fab fa-vk"></i></a>
+                <a href="#" onclick="window.open('https://t.me/share/url?url='+encodeURIComponent(window.location.href), '_blank')" class="btn btn-sm btn-outline-info me-1"><i class="fab fa-telegram"></i></a>
+            </div>
         </div>
     </div>
+
+    <div class="product-details mt-5">
+        <ul class="nav nav-tabs" id="productTabs" role="tablist">
+            <li class="nav-item" role="presentation">
+                <button class="nav-link active" id="description-tab" data-bs-toggle="tab" data-bs-target="#description" type="button" role="tab">Описание</button>
+            </li>
+            <li class="nav-item" role="presentation">
+                <button class="nav-link" id="specs-tab" data-bs-toggle="tab" data-bs-target="#specs" type="button" role="tab">Характеристики</button>
+            </li>
+        </ul>
+        
+        <div class="tab-content p-4 border border-top-0 rounded-bottom" id="productTabsContent">
+            <div class="tab-pane fade show active" id="description" role="tabpanel">
+                <?= nl2br(htmlspecialchars($product['description'] ?: 'Описание отсутствует')) ?>
+            </div>
+            
+            <div class="tab-pane fade" id="specs" role="tabpanel">
+                <?php if (!empty($attributes)): ?>
+                    <table class="table table-striped table-hover">
+                        <tbody>
+                            <?php foreach ($attributes as $attr): ?>
+                                <tr>
+                                    <th style="width: 40%" class="text-muted fw-normal"><?= htmlspecialchars($attr['name']) ?></th>
+                                    <td class="fw-medium">
+                                        <?php 
+                                        if ($attr['value_text']) echo htmlspecialchars($attr['value_text']);
+                                        elseif ($attr['value_number']) echo $attr['value_number'] . ' ' . $attr['unit'];
+                                        elseif ($attr['value_boolean']) echo $attr['value_boolean'] ? 'Да' : 'Нет';
+                                        ?>
+                                    </td>
+                                </tr>
+                            <?php endforeach; ?>
+                        </tbody>
+                    </table>
+                <?php else: ?>
+                    <p class="text-muted">Характеристики не указаны</p>
+                <?php endif; ?>
+            </div>
+        </div>
+    </div>
+
+    <div id="reviews" class="reviews-section mt-5">
+        <?php include __DIR__ . '/templates/reviews_template.php'; ?>
+    </div>
 </div>
+
+<style>
+/* Общая обертка товара */
+.product-wrapper {
+    background: #ffffff;
+    border-radius: 16px;
+    padding: 20px 0;
+}
+
+/* Галерея */
+.main-image-container {
+    border: 1px solid #f0f0f0;
+    border-radius: 12px;
+    padding: 15px;
+    text-align: center;
+    background: #fafafa;
+    transition: transform 0.3s ease;
+}
+.main-image-container:hover {
+    transform: scale(1.02);
+}
+.main-image {
+    width: 100%;
+    max-height: 400px;
+    object-fit: contain;
+}
+.thumbnail-gallery {
+    display: flex;
+    gap: 12px;
+    overflow-x: auto;
+    padding: 5px;
+    scrollbar-width: thin;
+}
+.thumbnail-gallery img {
+    width: 70px;
+    height: 70px;
+    object-fit: cover;
+    cursor: pointer;
+    border: 2px solid transparent;
+    border-radius: 8px;
+    opacity: 0.6;
+    transition: all 0.2s ease-in-out;
+}
+.thumbnail-gallery img:hover,
+.thumbnail-gallery img.primary {
+    border-color: #0d6efd;
+    opacity: 1;
+    transform: translateY(-2px);
+    box-shadow: 0 4px 8px rgba(13, 110, 253, 0.2);
+}
+
+/* Блок цены */
+.product-price-section {
+    background: #f8f9fa;
+    padding: 15px 20px;
+    border-radius: 12px;
+    border-left: 4px solid #0d6efd;
+    display: inline-block;
+    width: 100%;
+}
+
+/* Вариации товара (кнопки выбора) */
+.variations-list {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+    gap: 10px;
+}
+.variation-item {
+    cursor: pointer;
+    transition: all 0.2s ease;
+    border: 1px solid #dee2e6;
+    background: #fff;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.02);
+}
+.variation-item:hover:not(.out-of-stock) {
+    border-color: #adb5bd;
+    transform: translateY(-2px);
+    box-shadow: 0 4px 8px rgba(0,0,0,0.08);
+}
+.variation-item.selected {
+    border-color: #0d6efd !important;
+    background-color: #f0f7ff !important;
+    box-shadow: 0 0 0 1px #0d6efd;
+}
+.variation-item.out-of-stock {
+    opacity: 0.5;
+    cursor: not-allowed;
+    background: #f8f9fa;
+}
+
+/* Кнопки действий */
+.cart-form {
+    padding: 20px 0;
+    border-top: 1px dashed #e9ecef;
+    border-bottom: 1px dashed #e9ecef;
+}
+.quantity-input {
+    text-align: center;
+    font-weight: bold;
+}
+.product-actions .btn {
+    border-radius: 8px;
+    font-weight: 500;
+    transition: all 0.2s;
+}
+
+/* Стилизация вкладок (Табы) */
+.product-details .nav-tabs {
+    border-bottom: 2px solid #e9ecef;
+}
+.product-details .nav-link {
+    font-weight: 600;
+    color: #6c757d;
+    border: none;
+    border-bottom: 3px solid transparent;
+    padding: 12px 20px;
+    margin-bottom: -2px;
+}
+.product-details .nav-link:hover {
+    color: #0d6efd;
+    border-color: transparent;
+}
+.product-details .nav-link.active {
+    color: #0d6efd;
+    background-color: transparent;
+    border-bottom-color: #0d6efd;
+}
+.product-details .tab-content {
+    background: #fff;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.03);
+    border-radius: 0 0 12px 12px;
+    border: 1px solid #e9ecef;
+    border-top: none;
+}
+
+/* Звезды рейтинга */
+.rating-area {
+    display: flex !important;
+    flex-direction: row-reverse !important;
+    justify-content: flex-end;
+    margin-bottom: 15px;
+}
+.rating-area input { display: none; }
+.rating-area label {
+    font-size: 25px;
+    color: #ddd;
+    cursor: pointer;
+    margin-right: 5px;
+}
+.rating-area label:hover,
+.rating-area label:hover ~ label,
+.rating-area input:checked ~ label { color: #ffc107; }
+.rating-stars {
+    color: #ddd;
+}
+.rating-stars .star.filled {
+    color: #ffc107;
+}
+</style>
+
 <script>
 function changeImage(img) {
     document.getElementById('main-image').src = img.src;
 }
+
+function selectVariation(element, variationId, basePrice, stock) {
+    if (element.classList.contains('out-of-stock')) return;
+
+    // Обновляем скрытое поле для корзины
+    document.getElementById('selected_variation').value = variationId;
+    
+    // Обновляем состояние кнопки и инпута количества
+    const quantityInput = document.getElementById('quantity');
+    const submitButton = document.getElementById('add-to-cart-btn');
+    
+    if (stock > 0) {
+        quantityInput.max = stock;
+        quantityInput.disabled = false;
+        submitButton.disabled = false;
+    } else {
+        quantityInput.disabled = true;
+        submitButton.disabled = true;
+    }
+    
+    // Меняем стили (выделение нажатой кнопки)
+    document.querySelectorAll('.variation-item').forEach(item => {
+        item.classList.remove('selected', 'border-primary', 'bg-light');
+    });
+    element.classList.add('selected', 'border-primary', 'bg-light');
+
+    // --- ЛОГИКА ПЕРЕСЧЕТА ЦЕНЫ СО СКИДКОЙ ---
+    const priceDisplay = document.getElementById('current-price-display');
+    const oldPriceDisplay = document.getElementById('old-price-display');
+    
+    // Забираем данные акции из PHP
+    const hasPromo = <?= $promo_res ? 'true' : 'false' ?>;
+    const promoType = '<?= $promo_res['type'] ?? 'percent' ?>';
+    const promoValue = <?= $promo_res ? (($promo_res['discount_percent'] > 0) ? $promo_res['discount_percent'] : $promo_res['value']) : 0 ?>;
+
+    let finalPrice = basePrice;
+    let oldPrice = null;
+
+    if (hasPromo) {
+        oldPrice = basePrice;
+        // Если скидка в процентах
+        if (promoType === 'percent' || <?= ($promo_res['discount_percent'] ?? 0) > 0 ? 'true' : 'false' ?>) {
+            finalPrice = basePrice * (1 - (promoValue / 100));
+        } else {
+            // Если скидка в рублях
+            finalPrice = basePrice - promoValue;
+        }
+    }
+
+    // Красиво форматируем числа с пробелами
+    const formatter = new Intl.NumberFormat('ru-RU');
+    
+    if (priceDisplay) {
+        priceDisplay.textContent = formatter.format(Math.round(finalPrice)) + ' руб.';
+    }
+    
+    if (oldPriceDisplay && oldPrice) {
+        oldPriceDisplay.textContent = formatter.format(Math.round(oldPrice)) + ' руб.';
+    }
+}
+
+// 🔥 НОВАЯ ФУНКЦИЯ: Добавление в корзину через API
+function addToCartFromProduct() {
+    const productId = document.getElementById('product_id').value;
+    const variationId = document.getElementById('selected_variation').value;
+    const quantity = document.getElementById('quantity').value;
+    
+    const formData = new FormData();
+    formData.append('product_id', productId);
+    formData.append('quantity', quantity);
+    if (variationId) {
+        formData.append('variation_id', variationId);
+    }
+    
+    fetch('pages/cart/Api_Cart.php?action=add', {
+        method: 'POST',
+        body: formData
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            // Обновляем счётчик корзины в шапке
+            const cartCountEl = document.getElementById('cart-count');
+            if (cartCountEl) {
+                cartCountEl.textContent = data.count;
+            }
+            
+            // Показываем уведомление
+            showToast(data.message || 'Товар добавлен в корзину');
+            
+            // Обновляем боковую панель корзины если открыта
+            if (document.getElementById('cart-sidebar') && document.getElementById('cart-sidebar').classList.contains('active')) {
+                loadCartItems();
+            }
+        } else {
+            showToast(data.message || 'Ошибка при добавлении', 'error');
+        }
+    })
+    .catch(error => {
+        console.error('Error:', error);
+        showToast('Ошибка соединения', 'error');
+    });
+}
+
+// 🔥 ФУНКЦИЯ ПОКАЗА УВЕДОМЛЕНИЙ
+function showToast(message, type = 'success') {
+    // Удаляем старые тосты
+    const oldToast = document.querySelector('.toast-notification');
+    if (oldToast) oldToast.remove();
+    
+    const toast = document.createElement('div');
+    toast.className = `toast-notification alert alert-${type === 'error' ? 'danger' : 'success'} position-fixed`;
+    toast.style.cssText = 'top: 20px; right: 20px; z-index: 9999; padding: 15px 25px; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.15);';
+    toast.innerHTML = `
+        <i class="fas fa-${type === 'error' ? 'exclamation-circle' : 'check-circle'} me-2"></i>
+        ${message}
+    `;
+    
+    document.body.appendChild(toast);
+    
+    setTimeout(() => {
+        toast.style.opacity = '0';
+        toast.style.transform = 'translateX(100%)';
+        toast.style.transition = 'all 0.3s ease';
+        setTimeout(() => toast.remove(), 300);
+    }, 3000);
+}
+
+// Автоматический клик по первому доступному варианту при загрузке страницы
+document.addEventListener('DOMContentLoaded', function() {
+    const firstAvailable = document.querySelector('.variation-item:not(.out-of-stock)');
+    if (firstAvailable) {
+        firstAvailable.click();
+    }
+});
 </script>
-<?php
-$rec_query = $db->prepare("
-    SELECT a.id, a.category_id, a.name, a.brand, a.model, a.price, a.stock, a.description 
-    FROM accessories a
-    JOIN accessory_supported_smartphones ast ON a.id = ast.accessory_id
-    WHERE ast.smartphone_id = ?
-    ORDER BY RAND() 
-    LIMIT 3
-");
-$rec_query->bind_param('i', $product_id);
-$rec_query->execute();
-$rec_result = $rec_query->get_result();
 
-$promoAccStmt = $db->prepare("
-    SELECT discount_percent
-    FROM promotions
-    WHERE product_type = 'accessory'
-      AND product_id = ?
-      AND is_active = 1
-      AND start_date <= CURDATE()
-      AND (end_date >= CURDATE() OR end_date IS NULL)
-    LIMIT 1
-");
-
-if ($rec_result->num_rows > 0):
-?>
-    <div class="container recommended-container text-center">
-        <h2>Рекомендуемые аксессуары</h2><br><br>
-        <div class="row justify-content-center">
-            <?php while($rec = $rec_result->fetch_assoc()): ?>
-                <?php
-                $promoAccStmt->bind_param('i', $rec['id']);
-                $promoAccStmt->execute();
-                $pa = $promoAccStmt->get_result()->fetch_assoc();
-                ?>
-                <div class="col-md-3 mb-4">
-                    <div class="feature-card">
-                        <h5><?= htmlspecialchars($rec['brand'] . ' ' . $rec['name']); ?></h5><br>
-                        <p>Модель: <?= htmlspecialchars($rec['model']); ?></p>
-                        <?php if ($pa):
-                            $origA = (float)$rec['price'];
-                            $discA = (int)$pa['discount_percent'];
-                            $newA = $origA * (100 - $discA) / 100;
-                        ?>
-                            <p class="accessory-price">
-                                <del><?= number_format($origA, 0, ',', ' '); ?> руб.</del>
-                                <?= number_format($newA, 0, ',', ' '); ?> руб.
-                                <span class="badge bg-danger">-<?= $discA; ?>%</span>
-                            </p>
-                        <?php else: ?>
-                            <p>Цена: <?= number_format($rec['price'], 0, ',', ' '); ?> руб.</p>
-                        <?php endif; ?>
-                        <p>В наличии: <?= $rec['stock']; ?> шт.</p>
-                        <form method="POST" action="cart.php" class="cart-form">
-                            <input type="hidden" name="product_id" value="<?= $rec['id']; ?>">
-                            <input type="hidden" name="product_type" value="accessory">
-                            <input type="number" name="quantity" min="1" max="<?= $rec['stock']; ?>" value="1" class="quantity-input">
-                            <button type="submit" class="btn btn-primary btn-sm">В корзину</button>
-                        </form>
-                    </div>
-                </div>
-            <?php endwhile; ?>
-        </div>
-    </div>
-    <br>
-<?php
-endif;
-
-$recSmartQuery = $db->prepare("
-    SELECT s.id, s.name, s.brand, s.model, s.price, s.stock,
-           (SELECT image_url FROM smartphone_images WHERE smartphone_id = s.id LIMIT 1) AS image_url,
-           COUNT(pv.id) AS view_count
-    FROM product_views pv
-    JOIN smartphones s ON s.id = pv.product_id
-    WHERE pv.product_type = 'smartphone'
-      AND pv.product_id != ?
-      AND pv.session_id IN (
-          SELECT session_id FROM product_views
-          WHERE product_type = 'smartphone' AND product_id = ?
-      )
-    GROUP BY s.id
-    ORDER BY view_count DESC
-    LIMIT 3
-");
-$recSmartQuery->bind_param("ii", $product_id, $product_id);
-$recSmartQuery->execute();
-$recSmartResult = $recSmartQuery->get_result();
-
-$promoPhoneStmt = $db->prepare("
-    SELECT discount_percent
-    FROM promotions
-    WHERE product_type = 'smartphone'
-      AND product_id = ?
-      AND is_active = 1
-      AND start_date <= CURDATE()
-      AND (end_date >= CURDATE() OR end_date IS NULL)
-    LIMIT 1
-");
-
-if ($recSmartResult->num_rows > 0):
-?>
-<div class="container recommended-container text-center">
-    <h2>Похожие смартфоны</h2><br><br>
-    <div class="row justify-content-center">
-        <?php while($recSmart = $recSmartResult->fetch_assoc()): ?>
-            <?php
-            $promoPhoneStmt->bind_param('i', $recSmart['id']);
-            $promoPhoneStmt->execute();
-            $pp = $promoPhoneStmt->get_result()->fetch_assoc();
-            ?>
-            <div class="col-md-3 mb-4">
-                <div class="feature-card" onclick="window.location.href='product.php?id=<?= $recSmart['id']; ?>'">
-                    <?php if (!empty($recSmart['image_url'])): ?>
-                        <img src="<?= htmlspecialchars($recSmart['image_url']); ?>" alt="<?= htmlspecialchars($recSmart['name']); ?>" class="product-image">
-                    <?php else: ?>
-                        <img src="assets/no-image.png" alt="Нет изображения" class="product-image">
-                    <?php endif; ?>
-                    <h5><?= htmlspecialchars($recSmart['brand'] . ' ' . $recSmart['name']); ?></h5>
-                    <p>Модель: <?= htmlspecialchars($recSmart['model']); ?></p>
-                    <?php if ($pp):
-                        $origP = (float)$recSmart['price'];
-                        $discP = (int)$pp['discount_percent'];
-                        $newP = $origP * (100 - $discP) / 100;
-                    ?>
-                        <p class="product-price">
-                            <del><?= number_format($origP, 0, ',', ' '); ?> руб.</del>
-                            <?= number_format($newP, 0, ',', ' '); ?> руб.
-                            <span class="badge bg-danger">-<?= $discP; ?>%</span>
-                        </p>
-                    <?php else: ?>
-                        <p>Цена: <?= number_format($recSmart['price'], 0, ',', ' '); ?> руб.</p>
-                    <?php endif; ?>
-                    <p>В наличии: <?= $recSmart['stock']; ?> шт.</p>
-                </div>
-            </div>
-        <?php endwhile; ?>
-    </div>
-</div>
-<?php
-endif;
-
-require_once __DIR__ . '/inc/footer.php';
-?>
+<?php require_once __DIR__ . '/inc/footer.php'; ?>

@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=yes">
+    <title>Чат-бот | Интерфейс</title>
+    <!-- Подключаем шрифт Inter -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,400;14..32,500;14..32,600&display=swap" rel="stylesheet">
+    <!-- Font Awesome для иконок -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+    <!-- Подключаем внешний CSS -->
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<div class="chat-container">
+    <!-- Шапка -->
+    <div class="chat-header">
+        <div class="avatar-bot">
+            <i class="fas fa-robot"></i>
+        </div>
+        <div class="header-info">
+            <h2>AI Ассистент</h2>
+            <div class="status">
+                <span class="status-dot"></span>
+                <span>в сети · готова к интеграции</span>
+            </div>
+        </div>
+        <button class="btn-clear" id="clearChatBtn" title="Очистить историю">
+            <i class="fas fa-rotate-left"></i> <span>Новый диалог</span>
+        </button>
+    </div>
+
+    <!-- Окно сообщений -->
+    <div class="messages-area" id="messagesArea">
+        <!-- Приветственное сообщение (бот) -->
+        <div class="message bot" id="welcomeMessage">
+            <div class="avatar"><i class="fas fa-robot"></i></div>
+            <div class="bubble">
+                Привет! Я — интерфейс чат-бота. <br> 
+                Сейчас я работаю в демо-режиме, но готова к подключению любой ИИ-модели через API. 
+                Отправь мне что-нибудь 😊
+            </div>
+        </div>
+    </div>
+
+    <!-- Быстрые подсказки (для демо) -->
+    <div class="suggestions" id="suggestions">
+        <span class="suggestion-chip" data-text="Какая погода?">🌤️ Погода</span>
+        <span class="suggestion-chip" data-text="Расскажи новости">📰 Новости</span>
+        <span class="suggestion-chip" data-text="Помоги с кодом">💻 Помощь с кодом</span>
+        <span class="suggestion-chip" data-text="Привет!">👋 Привет</span>
+    </div>
+
+    <!-- Панель ввода -->
+    <div class="input-panel">
+        <div class="input-wrapper">
+            <textarea 
+                id="userInput" 
+                placeholder="Напишите сообщение..." 
+                rows="1"
+                oninput="autoResize(this)"
+            ></textarea>
+        </div>
+        <button class="btn-send" id="sendBtn">
+            <i class="fas fa-arrow-up"></i>
+        </button>
+    </div>
+</div>
+
+<script src="script.js"></script>
+</body>
+</html>
