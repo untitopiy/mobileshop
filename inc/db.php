@@ -4,7 +4,7 @@ $host = "localhost";
 $port = 3306;
 $user = "root";
 $password = ""; // Укажите свой пароль
-$dbname = "mobileshop";
+$dbname = "marketplace";
 
 // Подключение к базе данных
 $db = new mysqli($host, $user, $password, $dbname, $port);

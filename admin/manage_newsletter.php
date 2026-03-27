@@ -2,6 +2,7 @@
 session_start();
 require_once __DIR__ . '/../inc/db.php';
 require_once __DIR__ . '/../inc/mail.php';
+require_once __DIR__ . '/../inc/header.php';
 
 if (!isset($_SESSION['id'])) {
     header("Location: ../pages/auth.php");

@@ -1,300 +1,296 @@
 <?php
 session_start();
+require_once __DIR__ . '/check_admin.php';
 require_once __DIR__ . '/../inc/db.php';
+require_once __DIR__ . '/../inc/functions.php';
 
-// доступ только для админа
-if (!isset($_SESSION['id'])) {
-    header("Location: http://{$_SERVER['HTTP_HOST']}/mobileshop/pages/auth.php");
+// --- ЛОГИКА ОБРАБОТКИ (ДО ВЫВОДА HTML) ---
+
+// 1. Удаление акции
+if (isset($_POST['delete_promotion'])) {
+    $promotion_id = (int)$_POST['promotion_id'];
+    $stmt = $db->prepare("DELETE FROM promotions WHERE id = ?");
+    $stmt->bind_param('i', $promotion_id);
+    if ($stmt->execute()) {
+        $_SESSION['success'] = "Акция успешно удалена";
+    }
+    header("Location: manage_promotions.php");
     exit;
 }
-$user_id = $_SESSION['id'];
-$stmt = $db->prepare("SELECT is_admin FROM users WHERE id = ?");
-$stmt->bind_param("i", $user_id);
+
+// 2. Добавление акции
+if (isset($_POST['add_promotion'])) {
+    $name = trim($_POST['name']);
+    $slug = trim($_POST['slug']) ?: generateSlug($name);
+    $description = trim($_POST['description']);
+    $type = $_POST['type'];
+    $value = (float)$_POST['value'];
+    $starts_at = !empty($_POST['starts_at']) ? $_POST['starts_at'] : null;
+    $expires_at = !empty($_POST['expires_at']) ? $_POST['expires_at'] : null;
+    $is_active = isset($_POST['is_active']) ? 1 : 0;
+
+    $stmt = $db->prepare("INSERT INTO promotions (name, slug, description, type, value, starts_at, expires_at, is_active) VALUES (?, ?, ?, ?, ?, ?, ?, ?)");
+    $stmt->bind_param('ssssdssi', $name, $slug, $description, $type, $value, $starts_at, $expires_at, $is_active);
+    
+    if ($stmt->execute()) {
+        $_SESSION['success'] = "Акция успешно создана";
+    }
+    header("Location: manage_promotions.php");
+    exit;
+}
+
+// 3. Редактирование акции (Здесь была ошибка в bind_param)
+if (isset($_POST['edit_promotion'])) {
+    $promotion_id = (int)$_POST['promotion_id'];
+    $name = trim($_POST['name']);
+    $slug = trim($_POST['slug']) ?: generateSlug($name);
+    $description = trim($_POST['description']);
+    $type = $_POST['type'];
+    $value = (float)$_POST['value'];
+    $starts_at = !empty($_POST['starts_at']) ? $_POST['starts_at'] : null;
+    $expires_at = !empty($_POST['expires_at']) ? $_POST['expires_at'] : null;
+    $is_active = isset($_POST['is_active']) ? 1 : 0;
+
+    // 9 параметров: name, slug, description, type, value, starts_at, expires_at, is_active, id
+    $stmt = $db->prepare("UPDATE promotions SET name = ?, slug = ?, description = ?, type = ?, value = ?, starts_at = ?, expires_at = ?, is_active = ? WHERE id = ?");
+    
+    // Исправленная строка типов: s(name) s(slug) s(desc) s(type) d(value) s(starts) s(expires) i(is_active) i(id)
+    $types = 'ssssdssii'; 
+    $stmt->bind_param($types, $name, $slug, $description, $type, $value, $starts_at, $expires_at, $is_active, $promotion_id);
+    
+    if ($stmt->execute()) {
+        $_SESSION['success'] = "Акция успешно обновлена";
+    }
+    header("Location: manage_promotions.php");
+    exit;
+}
+
+// --- ПОДГОТОВКА ДАННЫХ ДЛЯ ВЫВОДА ---
+
+// Параметры фильтрации
+$filter_status = $_GET['status'] ?? 'all';
+$search = trim($_GET['search'] ?? '');
+
+$where = ["1=1"];
+$params = [];
+$param_types = "";
+
+if ($filter_status === 'active') {
+    $where[] = "is_active = 1 AND (starts_at <= NOW() OR starts_at IS NULL) AND (expires_at >= NOW() OR expires_at IS NULL)";
+} elseif ($filter_status === 'inactive') {
+    $where[] = "is_active = 0";
+}
+
+if ($search) {
+    $where[] = "name LIKE ?";
+    $params[] = "%$search%";
+    $param_types .= "s";
+}
+
+$query = "SELECT * FROM promotions WHERE " . implode(" AND ", $where) . " ORDER BY created_at DESC";
+$stmt = $db->prepare($query);
+if ($params) {
+    $stmt->bind_param($param_types, ...$params);
+}
 $stmt->execute();
-$stmt->bind_result($is_admin);
-$stmt->fetch();
-$stmt->close();
-if (!$is_admin) {
-    header("HTTP/1.0 403 Forbidden");
-    exit;
-}
+$promotions = $stmt->get_result();
 
-$warning = '';    // Для вывода предупреждения
-$promo   = null;  // Данные редактируемой акции
-
-// CREATE или UPDATE
-if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    $action = $_POST['action'];
-    $pt     = $_POST['product_type'];
-    $pid    = (int)$_POST['product_id'];
-    $disc   = max(1, min(100, (int)$_POST['discount_percent']));
-    $sd     = $_POST['start_date'];
-    $ed     = isset($_POST['indefinite']) ? null : $_POST['end_date'];
-    $ia     = isset($_POST['is_active']) ? 1 : 0;
-
-    // Если создаём, то проверяем конфликт
-    if ($action === 'create') {
-        $chk = $db->prepare("
-            SELECT * FROM promotions
-             WHERE product_type = ? AND product_id = ?
-             LIMIT 1
-        ");
-        $chk->bind_param("si", $pt, $pid);
-        $chk->execute();
-        $res = $chk->get_result();
-        if ($row = $res->fetch_assoc()) {
-            // Конфликт: переводим форму в режим редактирования существующей акции
-            $promo = $row;
-            // подставляем новые поля
-            $promo['discount_percent'] = $disc;
-            $promo['start_date']       = $sd;
-            $promo['end_date']         = $ed;
-            $promo['is_active']        = $ia;
-            $warning = "Для этого товара уже существует акция (ID {$row['id']}). Вы можете её обновить.";
-            // меняем action на update
-            $_POST['action'] = 'update';
-            $_POST['id']     = $row['id'];
-            $action = 'update';
-        }
-        $chk->close();
-    }
-
-    // если после проверки action всё ещё create — вставляем
-    if ($action === 'create') {
-        $ins = $db->prepare("
-            INSERT INTO promotions
-                (product_type,product_id,discount_percent,start_date,end_date,is_active)
-            VALUES (?, ?, ?, ?, ?, ?)
-        ");
-        $ins->bind_param("siissi", $pt, $pid, $disc, $sd, $ed, $ia);
-        $ins->execute();
-        $ins->close();
-        header("Location: manage_promotions.php");
-        exit;
-    }
-
-    // UPDATE
-    if ($action === 'update') {
-        $id = (int)$_POST['id'];
-        $upd = $db->prepare("
-            UPDATE promotions SET
-                product_type=?, product_id=?, discount_percent=?,
-                start_date=?, end_date=?, is_active=?
-            WHERE id=?
-        ");
-        $upd->bind_param("siissii", $pt, $pid, $disc, $sd, $ed, $ia, $id);
-        $upd->execute();
-        $upd->close();
-        header("Location: manage_promotions.php");
-        exit;
-    }
-}
-
-// DELETE
-if (isset($_GET['delete'])) {
-    $id = (int)$_GET['delete'];
-    $db->query("DELETE FROM promotions WHERE id=$id");
-    header("Location: manage_promotions.php");
-    exit;
-}
-
-// ВКЛ/ВЫКЛ
-if (isset($_GET['toggle'])) {
-    $id = (int)$_GET['toggle'];
-    $db->query("UPDATE promotions SET is_active = 1 - is_active WHERE id=$id");
-    header("Location: manage_promotions.php");
-    exit;
-}
-
-// Редактирование — загрузка одной записи
-if (!empty($_GET['edit'])) {
-    $id = (int)$_GET['edit'];
-    $res = $db->query("SELECT * FROM promotions WHERE id=$id");
-    $promo = $res->fetch_assoc();
-}
-
-// списки товаров
-$sm = $db->query("SELECT id, brand, name, price FROM smartphones");
-$ac = $db->query("SELECT id, brand, name, price FROM accessories");
-// все акции + price
-$all = $db->query("
-    SELECT p.*,
-           COALESCE(s.brand, a.brand) AS brand,
-           COALESCE(s.name, a.name)   AS name,
-           COALESCE(s.price, a.price) AS original_price
-      FROM promotions p
- LEFT JOIN smartphones s ON p.product_type='smartphone' AND p.product_id=s.id
- LEFT JOIN accessories a ON p.product_type='accessory'  AND p.product_id=a.id
-     ORDER BY p.start_date DESC
-");
-
+// Подключаем хедер только здесь
 require_once __DIR__ . '/../inc/header.php';
 ?>
 
-<div class="container my-5">
-  <h1>Управление акциями</h1>
-  <?php if ($warning): ?>
-    <div class="alert alert-warning"><?= htmlspecialchars($warning) ?></div>
-  <?php endif; ?>
+<div class="container-fluid admin-container my-5">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h1>Управление акциями</h1>
+        <button class="btn btn-success" data-bs-toggle="modal" data-bs-target="#addPromotionModal">
+            <i class="fas fa-plus"></i> Создать акцию
+        </button>
+    </div>
 
-  <table class="table table-bordered table-striped mt-4">
-    <thead class="table-light">
-      <tr>
-        <th>ID</th>
-        <th>Товар</th>
-        <th>Старая цена</th>
-        <th>Новая цена</th>
-        <th>Скидка</th>
-        <th>Период</th>
-        <th>Активно</th>
-        <th>Действия</th>
-      </tr>
-    </thead>
-    <tbody>
-      <?php while ($r = $all->fetch_assoc()): ?>
-        <?php
-          $orig = (float)$r['original_price'];
-          $new  = $orig * (100 - $r['discount_percent']) / 100;
-        ?>
-        <tr>
-          <td><?= $r['id'] ?></td>
-          <td><?= htmlspecialchars($r['brand'].' '.$r['name']) ?></td>
-          <td><?= number_format($orig, 2, ',', ' ') ?> руб.</td>
-          <td><?= number_format($new, 2, ',', ' ') ?> руб.</td>
-          <td><?= $r['discount_percent'] ?>%</td>
-          <td>
-            <?= $r['start_date'] ?>
-            — 
-            <?= $r['end_date'] ?? '<em>бессрочно</em>' ?>
-          </td>
-          <td><?= $r['is_active'] ? 'Да' : 'Нет' ?></td>
-          <td>
-            <div class="btn-group" role="group">
-              <a href="?edit=<?= $r['id'] ?>" class="btn btn-sm action-btn">Изменить</a>
-              <a href="?toggle=<?= $r['id'] ?>" class="btn btn-sm action-btn">
-                <?= $r['is_active'] ? 'Выключить' : 'Включить' ?>
-              </a>
-              <a href="?delete=<?= $r['id'] ?>" class="btn btn-sm action-btn" onclick="return confirm('Удалить акцию?')">
-                Удалить
-              </a>
-            </div>
-          </td>
-        </tr>
-      <?php endwhile; ?>
-    </tbody>
-  </table>
-
-  <hr class="my-4">
-
-  <h2><?= $promo ? 'Редактировать' : 'Добавить' ?> акцию</h2>
-  <form method="POST" class="mt-3">
-    <input type="hidden" name="action" value="<?= $promo ? 'update' : 'create' ?>">
-    <?php if ($promo): ?>
-      <input type="hidden" name="id" value="<?= $promo['id'] ?>">
+    <?php if (isset($_SESSION['success'])): ?>
+        <div class="alert alert-success alert-dismissible fade show">
+            <?= $_SESSION['success']; unset($_SESSION['success']); ?>
+            <button type="button" class="btn-close" data-bs-dismiss="show"></button>
+        </div>
     <?php endif; ?>
 
-    <div class="row mb-3">
-      <div class="col-md-4">
-        <label class="form-label">Тип товара</label>
-        <select name="product_type" id="ptype" class="form-select">
-          <option value="smartphone" <?= ($promo['product_type'] ?? '') === 'smartphone' ? 'selected' : '' ?>>Смартфон</option>
-          <option value="accessory"  <?= ($promo['product_type'] ?? '') === 'accessory'  ? 'selected' : '' ?>>Аксессуар</option>
-        </select>
-      </div>
-      <div class="col-md-4">
-        <label class="form-label">Товар</label>
-        <select name="product_id" id="pid" class="form-select" required></select>
-      </div>
-      <div class="col-md-4">
-        <label class="form-label">Скидка (%)</label>
-        <input
-          type="number"
-          name="discount_percent"
-          class="form-control"
-          min="1" max="100"
-          value="<?= $promo['discount_percent'] ?? '' ?>"
-          required
-        >
-      </div>
-    </div>
-
-    <div class="row mb-3">
-      <div class="col-md-4">
-        <label class="form-label">С (начало)</label>
-        <input
-          type="date"
-          name="start_date"
-          class="form-control"
-          value="<?= $promo['start_date'] ?? date('Y-m-d') ?>"
-          required
-        >
-      </div>
-      <div class="col-md-4">
-        <label class="form-label">По (окончание)</label>
-        <input
-          type="date"
-          name="end_date"
-          id="end_date"
-          class="form-control"
-          value="<?= $promo['end_date'] ?? '' ?>"
-          <?= empty($promo['end_date']) ? 'disabled' : '' ?>
-        >
-      </div>
-      <div class="col-md-4 d-flex align-items-center">
-        <div class="form-check mt-4">
-          <input
-            type="checkbox"
-            name="indefinite"
-            id="indefinite"
-            class="form-check-input"
-            <?= empty($promo['end_date']) ? 'checked' : '' ?>
-          >
-          <label for="indefinite" class="form-check-label">Бессрочно</label>
+    <div class="card mb-4">
+        <div class="card-body">
+            <form method="GET" class="row g-3">
+                <div class="col-md-4">
+                    <input type="text" name="search" class="form-control" placeholder="Поиск по названию..." value="<?= htmlspecialchars($search) ?>">
+                </div>
+                <div class="col-md-3">
+                    <select name="status" class="form-select">
+                        <option value="all" <?= $filter_status == 'all' ? 'selected' : '' ?>>Все статусы</option>
+                        <option value="active" <?= $filter_status == 'active' ? 'selected' : '' ?>>Активные</option>
+                        <option value="inactive" <?= $filter_status == 'inactive' ? 'selected' : '' ?>>Неактивные</option>
+                    </select>
+                </div>
+                <div class="col-md-2">
+                    <button type="submit" class="btn btn-primary w-100">Фильтровать</button>
+                </div>
+            </form>
         </div>
-      </div>
     </div>
 
-    <div class="form-check mb-4">
-      <input
-        type="checkbox"
-        name="is_active"
-        id="ia"
-        class="form-check-input"
-        <?= ($promo['is_active'] ?? 1) ? 'checked' : '' ?>
-      >
-      <label for="ia" class="form-check-label">Активна</label>
-    </div>
+    <div class="card">
+        <div class="table-responsive">
+            <table class="table table-hover mb-0">
+                <thead class="table-light">
+                    <tr>
+                        <th>Название</th>
+                        <th>Тип</th>
+                        <th>Значение</th>
+                        <th>Период действия</th>
+                        <th>Статус</th>
+                        <th class="text-end">Действия</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <?php if ($promotions->num_rows > 0): ?>
+                        <?php while ($promo = $promotions->fetch_assoc()): ?>
+                            <tr>
+                                <td>
+                                    <strong><?= htmlspecialchars($promo['name']) ?></strong>
+                                    <div class="small text-muted"><?= htmlspecialchars($promo['slug']) ?></div>
+                                </td>
+                                <td><?= $promo['type'] == 'percent' ? 'Процент' : 'Фикс. сумма' ?></td>
+                                <td><?= $promo['value'] ?><?= $promo['type'] == 'percent' ? '%' : ' руб.' ?></td>
+                                <td>
+                                    <small>
+                                        С: <?= $promo['starts_at'] ? date('d.m.y', strtotime($promo['starts_at'])) : '—' ?><br>
+                                        По: <?= $promo['expires_at'] ? date('d.m.y', strtotime($promo['expires_at'])) : '—' ?>
+                                    </small>
+                                </td>
+                                <td>
+                                    <?php if ($promo['is_active']): ?>
+                                        <span class="badge bg-success">Активна</span>
+                                    <?php else: ?>
+                                        <span class="badge bg-secondary">Черновик</span>
+                                    <?php endif; ?>
+                                </td>
+                                <td class="text-end">
+                                    <button class="btn btn-sm btn-outline-primary" data-bs-toggle="modal" data-bs-target="#editPromo<?= $promo['id'] ?>">
+                                        <i class="fas fa-edit"></i>
+                                    </button>
+                                    <form method="POST" class="d-inline" onsubmit="return confirm('Удалить акцию?')">
+                                        <input type="hidden" name="promotion_id" value="<?= $promo['id'] ?>">
+                                        <button type="submit" name="delete_promotion" class="btn btn-sm btn-outline-danger">
+                                            <i class="fas fa-trash"></i>
+                                        </button>
+                                    </form>
+                                </td>
+                            </tr>
 
-    <button class="btn btn-primary"><?= $promo ? 'Сохранить' : 'Добавить' ?></button>
-  </form>
+                            <div class="modal fade" id="editPromo<?= $promo['id'] ?>" tabindex="-1">
+                                <div class="modal-dialog">
+                                    <div class="modal-content">
+                                        <form method="POST">
+                                            <input type="hidden" name="promotion_id" value="<?= $promo['id'] ?>">
+                                            <div class="modal-header">
+                                                <h5 class="modal-title">Редактировать акцию</h5>
+                                                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                                            </div>
+                                            <div class="modal-body">
+                                                <div class="mb-3">
+                                                    <label class="form-label">Название</label>
+                                                    <input type="text" name="name" class="form-control" value="<?= htmlspecialchars($promo['name']) ?>" required>
+                                                </div>
+                                                <div class="row">
+                                                    <div class="col-md-6 mb-3">
+                                                        <label class="form-label">Тип</label>
+                                                        <select name="type" class="form-select">
+                                                            <option value="percent" <?= $promo['type'] == 'percent' ? 'selected' : '' ?>>Процент (%)</option>
+                                                            <option value="fixed" <?= $promo['type'] == 'fixed' ? 'selected' : '' ?>>Фикс. сумма</option>
+                                                        </select>
+                                                    </div>
+                                                    <div class="col-md-6 mb-3">
+                                                        <label class="form-label">Значение</label>
+                                                        <input type="number" step="0.01" name="value" class="form-control" value="<?= $promo['value'] ?>" required>
+                                                    </div>
+                                                </div>
+                                                <div class="row">
+                                                    <div class="col-md-6 mb-3">
+                                                        <label class="form-label">Дата начала</label>
+                                                        <input type="datetime-local" name="starts_at" class="form-control" value="<?= $promo['starts_at'] ? date('Y-m-d\TH:i', strtotime($promo['starts_at'])) : '' ?>">
+                                                    </div>
+                                                    <div class="col-md-6 mb-3">
+                                                        <label class="form-label">Дата окончания</label>
+                                                        <input type="datetime-local" name="expires_at" class="form-control" value="<?= $promo['expires_at'] ? date('Y-m-d\TH:i', strtotime($promo['expires_at'])) : '' ?>">
+                                                    </div>
+                                                </div>
+                                                <div class="form-check form-switch">
+                                                    <input class="form-check-input" type="checkbox" name="is_active" <?= $promo['is_active'] ? 'checked' : '' ?>>
+                                                    <label class="form-check-label">Активна</label>
+                                                </div>
+                                            </div>
+                                            <div class="modal-footer">
+                                                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Отмена</button>
+                                                <button type="submit" name="edit_promotion" class="btn btn-primary">Сохранить</button>
+                                            </div>
+                                        </form>
+                                    </div>
+                                </div>
+                            </div>
+                        <?php endwhile; ?>
+                    <?php else: ?>
+                        <tr><td colspan="6" class="text-center py-4">Акций не найдено</td></tr>
+                    <?php endif; ?>
+                </tbody>
+            </table>
+        </div>
+    </div>
 </div>
 
-<script>
-// данные для селекторов
-const smartphones = <?= json_encode($sm->fetch_all(MYSQLI_ASSOC)) ?>;
-const accessories  = <?= json_encode($ac->fetch_all(MYSQLI_ASSOC)) ?>;
-const ptype        = document.getElementById('ptype');
-const pid          = document.getElementById('pid');
-const indefinite   = document.getElementById('indefinite');
-const endDateEl    = document.getElementById('end_date');
-const selectedPid  = <?= json_encode($promo['product_id'] ?? null) ?>;
-
-function loadProducts() {
-  const list = ptype.value === 'smartphone' ? smartphones : accessories;
-  pid.innerHTML = list.map(o => `
-    <option value="${o.id}" ${o.id == selectedPid ? 'selected' : ''}>
-      ${o.brand} ${o.name}
-    </option>
-  `).join('');
-}
-
-ptype.addEventListener('change', loadProducts);
-loadProducts();
-
-indefinite.addEventListener('change', () => {
-  endDateEl.disabled = indefinite.checked;
-  if (indefinite.checked) endDateEl.value = '';
-});
-</script>
+<div class="modal fade" id="addPromotionModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <form method="POST">
+                <div class="modal-header">
+                    <h5 class="modal-title">Новая акция</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label class="form-label">Название</label>
+                        <input type="text" name="name" class="form-control" required>
+                    </div>
+                    <div class="row">
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label">Тип</label>
+                            <select name="type" class="form-select">
+                                <option value="percent">Процент (%)</option>
+                                <option value="fixed">Фикс. сумма</option>
+                            </select>
+                        </div>
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label">Значение</label>
+                            <input type="number" step="0.01" name="value" class="form-control" required>
+                        </div>
+                    </div>
+                    <div class="row">
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label">Дата начала</label>
+                            <input type="datetime-local" name="starts_at" class="form-control">
+                        </div>
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label">Дата окончания</label>
+                            <input type="datetime-local" name="expires_at" class="form-control">
+                        </div>
+                    </div>
+                    <div class="form-check form-switch">
+                        <input class="form-check-input" type="checkbox" name="is_active" checked>
+                        <label class="form-check-label">Активна</label>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Отмена</button>
+                    <button type="submit" name="add_promotion" class="btn btn-success">Создать</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
 
 <?php require_once __DIR__ . '/../inc/footer.php'; ?>

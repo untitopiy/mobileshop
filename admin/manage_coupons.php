@@ -1,275 +1,303 @@
- <?php
+<?php
+// 1. ИНИЦИАЛИЗАЦИЯ И СЕССИЯ
 session_start();
+
+// 2. ПОДКЛЮЧЕНИЕ БД И ФУНКЦИЙ (БЕЗ ВЫВОДА HTML)
 require_once __DIR__ . '/../inc/db.php';
-require_once __DIR__ . '/../inc/header.php';
+require_once __DIR__ . '/../inc/functions.php';
 
+// 3. ПРОВЕРКА ПРАВ (Файл check_admin.php должен содержать только PHP и exit в конце при неудаче)
+require_once __DIR__ . '/check_admin.php'; 
 
-if (!isset($_SESSION['id'])) {
-    header("Location: ../pages/auth.php");
+// 4. ОБРАБОТКА ДЕЙСТВИЙ (POST/GET) - ДО ВЫВОДА HTML
+// Обработка удаления
+if (isset($_GET['delete']) && is_numeric($_GET['delete'])) {
+    $id = (int)$_GET['delete'];
+    $db->query("DELETE FROM coupons WHERE id = $id");
+    $_SESSION['success'] = "Купон удален";
+    header("Location: manage_coupons.php");
     exit;
 }
 
-$user_id = $_SESSION['id'];
-$stmt = $db->prepare("SELECT is_admin FROM users WHERE id=?");
-$stmt->bind_param("i", $user_id);
-$stmt->execute();
-$stmt->bind_result($is_admin);
-$stmt->fetch();
-$stmt->close();
-
-if (!$is_admin) {
-    http_response_code(403);
-    echo "<div class='container'><h2>Доступ запрещен</h2></div>";
+// Обработка изменения статуса
+if (isset($_GET['toggle_status']) && is_numeric($_GET['toggle_status'])) {
+    $id = (int)$_GET['toggle_status'];
+    $db->query("UPDATE coupons SET status = CASE WHEN status = 'active' THEN 'inactive' ELSE 'active' END WHERE id = $id");
+    $_SESSION['success'] = "Статус купона изменен";
+    header("Location: manage_coupons.php");
     exit;
 }
 
-$message = '';
-
-// POST обработка
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
-    $coupon_id = (int)($_POST['coupon_id'] ?? 0);
-
-    if ($_POST['action'] === 'delete') {
-        $stmt = $db->prepare("DELETE FROM coupons WHERE id=?");
-        $stmt->bind_param("i", $coupon_id);
-        $stmt->execute();
-        $stmt->close();
-        $message = "Купон удалён.";
-    }
-
-    if ($_POST['action'] === 'edit') {
-        $type = $_POST['type'];
-        $value = (float)$_POST['value'];
-        $scope = $_POST['scope'] ?? 'global';
-        $user_id_coupon = $scope === 'personal' && !empty($_POST['user_id']) ? (int)$_POST['user_id'] : NULL;
-        $product_id = !empty($_POST['product_id']) ? (int)$_POST['product_id'] : NULL;
-        $expires_at = $_POST['expires_at'] ?? '';
-        if ($expires_at === '' || $expires_at === '0000-00-00') $expires_at = date('Y-m-d', strtotime('+30 days'));
-
-        $stmt = $db->prepare("UPDATE coupons SET discount_type=?, discount_value=?, user_id=?, product_id=?, expires_at=?, type=? WHERE id=?");
-        if ($stmt) {
-            $stmt->bind_param("ssdissi", $type, $value, $user_id_coupon, $product_id, $expires_at, $scope, $coupon_id);
-            $stmt->execute();
-            $stmt->close();
-            $message = "Купон обновлён.";
-        }
-    }
-}
-
-// Добавление купонов
+// Обработка добавления купона
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['add_coupon'])) {
+    $code = strtoupper(trim($_POST['code']));
+    $name = trim($_POST['name']);
+    $description = trim($_POST['description']);
     $type = $_POST['type'];
-    $value = (float)$_POST['value'];
-    $scope = $_POST['scope'] ?? 'global';
-    $user_id_coupon = $scope === 'personal' ? (int)($_POST['user_id'] ?? 0) : NULL;
-    $product_id = isset($_POST['product_id']) && $_POST['product_id'] !== '' ? (int)$_POST['product_id'] : NULL;
-    $expires_at = $_POST['expires_at'] ?? '';
-    if ($expires_at === '' || $expires_at === '0000-00-00') $expires_at = date('Y-m-d', strtotime('+30 days'));
-    $count = max(1, (int)($_POST['count'] ?? 1));
-
-    for ($i = 0; $i < $count; $i++) {
+    $discount_type = $_POST['discount_type'];
+    $discount_value = (float)$_POST['discount_value'];
+    $min_order_amount = !empty($_POST['min_order_amount']) ? (float)$_POST['min_order_amount'] : null;
+    $max_discount_amount = !empty($_POST['max_discount_amount']) ? (float)$_POST['max_discount_amount'] : null;
+    $usage_limit = !empty($_POST['usage_limit']) ? (int)$_POST['usage_limit'] : null;
+    $usage_limit_per_user = !empty($_POST['usage_limit_per_user']) ? (int)$_POST['usage_limit_per_user'] : 1;
+    $starts_at = $_POST['starts_at'];
+    $expires_at = $_POST['expires_at'];
+    
+    if (empty($code)) {
         $code = strtoupper(bin2hex(random_bytes(4)));
-        $stmt = $db->prepare("INSERT INTO coupons (code, type, discount_type, discount_value, user_id, product_id, expires_at, status) VALUES (?, ?, ?, ?, ?, ?, ?, 'active')");
-        if ($stmt) {
-            $stmt->bind_param("sssdiis", $code, $scope, $type, $value, $user_id_coupon, $product_id, $expires_at);
-            $stmt->execute();
-            $stmt->close();
+    }
+    
+    $check = $db->prepare("SELECT id FROM coupons WHERE code = ?");
+    $check->bind_param('s', $code);
+    $check->execute();
+    if ($check->get_result()->num_rows > 0) {
+        $_SESSION['error'] = "Купон с таким кодом уже существует";
+    } else {
+        $stmt = $db->prepare("
+            INSERT INTO coupons (
+                code, name, description, type, discount_type, discount_value,
+                min_order_amount, max_discount_amount, usage_limit, usage_limit_per_user,
+                starts_at, expires_at, status, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', NOW())
+        ");
+        $stmt->bind_param(
+            "sssssddiisss",
+            $code, $name, $description, $type, $discount_type, $discount_value,
+            $min_order_amount, $max_discount_amount, $usage_limit, $usage_limit_per_user,
+            $starts_at, $expires_at
+        );
+        
+        if ($stmt->execute()) {
+            $coupon_id = $stmt->insert_id;
+            
+            // Привязка товаров
+            if (isset($_POST['products']) && is_array($_POST['products'])) {
+                $prod_stmt = $db->prepare("INSERT INTO coupon_products (coupon_id, product_id) VALUES (?, ?)");
+                foreach ($_POST['products'] as $product_id) {
+                    $prod_stmt->bind_param('ii', $coupon_id, $product_id);
+                    $prod_stmt->execute();
+                }
+            }
+            
+            // Привязка категорий
+            if (isset($_POST['categories']) && is_array($_POST['categories'])) {
+                $cat_stmt = $db->prepare("INSERT INTO coupon_categories (coupon_id, category_id) VALUES (?, ?)");
+                foreach ($_POST['categories'] as $category_id) {
+                    $cat_stmt->bind_param('ii', $coupon_id, $category_id);
+                    $cat_stmt->execute();
+                }
+            }
+            $_SESSION['success'] = "Купон успешно создан";
+        } else {
+            $_SESSION['error'] = "Ошибка при создании купона";
         }
     }
-    $message = "Создано $count купон(ов).";
+    header("Location: manage_coupons.php");
+    exit;
 }
 
-// Списки пользователей и товаров
-$users = $db->query("SELECT id, login FROM users WHERE is_admin=0 ORDER BY login");
-$products = $db->query("SELECT id, CONCAT(brand,' ',name,' ',model) AS title FROM smartphones 
-                        UNION 
-                        SELECT id, CONCAT(brand,' ',name,' ',model) FROM accessories ORDER BY title ASC");
+// 5. ПОДГОТОВКА ДАННЫХ ДЛЯ ОТОБРАЖЕНИЯ
+$filter_status = $_GET['status'] ?? 'all';
+$filter_type = $_GET['type'] ?? 'all';
+$search = trim($_GET['search'] ?? '');
+$items_per_page = (isset($_GET['items_per_page']) && is_numeric($_GET['items_per_page'])) ? (int)$_GET['items_per_page'] : 20;
+$page = max(1, (int)($_GET['page'] ?? 1));
+$offset = ($page - 1) * $items_per_page;
 
-// Пагинация
-$perPage = 10;
-$page = isset($_GET['page']) ? max(1, (int)$_GET['page']) : 1;
-$offset = ($page - 1) * $perPage;
+$where_conditions = ["1=1"];
+$params = [];
+$types = "";
 
-$totalResult = $db->query("SELECT COUNT(*) AS total FROM coupons");
-$totalRow = $totalResult->fetch_assoc();
-$totalCoupons = (int)$totalRow['total'];
-$totalPages = ceil($totalCoupons / $perPage);
+if ($filter_status !== 'all') {
+    $where_conditions[] = "c.status = ?";
+    $params[] = $filter_status;
+    $types .= "s";
+}
+if ($filter_type !== 'all') {
+    $where_conditions[] = "c.type = ?";
+    $params[] = $filter_type;
+    $types .= "s";
+}
+if (!empty($search)) {
+    $where_conditions[] = "(c.code LIKE ? OR c.name LIKE ?)";
+    $st = "%$search%";
+    $params[] = $st; $params[] = $st;
+    $types .= "ss";
+}
 
-$result = $db->query("
-    SELECT c.*, u.login, p.title AS product_title 
-    FROM coupons c 
-    LEFT JOIN users u ON c.user_id=u.id 
-    LEFT JOIN (
-        SELECT id, CONCAT(brand,' ',name,' ',model) AS title FROM smartphones 
-        UNION 
-        SELECT id, CONCAT(brand,' ',name,' ',model) FROM accessories
-    ) p ON c.product_id=p.id 
-    ORDER BY c.created_at DESC
-    LIMIT $perPage OFFSET $offset
-");
+$where_clause = implode(" AND ", $where_conditions);
 
-?> 
+// Считаем общее количество
+$count_stmt = $db->prepare("SELECT COUNT(*) as count FROM coupons c WHERE $where_clause");
+if (!empty($params)) $count_stmt->bind_param($types, ...$params);
+$count_stmt->execute();
+$total_coupons = $count_stmt->get_result()->fetch_assoc()['count'];
+$total_pages = ceil($total_coupons / $items_per_page);
 
-<link rel="stylesheet" href="../inc/styles.css">
+// Получаем купоны
+$sql = "SELECT c.*, COUNT(cu.id) as actual_usage 
+        FROM coupons c 
+        LEFT JOIN coupon_usage cu ON cu.coupon_id = c.id 
+        WHERE $where_clause 
+        GROUP BY c.id 
+        ORDER BY c.created_at DESC 
+        LIMIT ? OFFSET ?";
+$stmt = $db->prepare($sql);
+$final_params = $params;
+$final_params[] = $items_per_page;
+$final_params[] = $offset;
+$stmt->bind_param($types . "ii", ...$final_params);
+$stmt->execute();
+$coupons = $stmt->get_result();
 
-<div class="admin-wrapper">
-    <h1 class="admin-title">Управление купонами</h1>
-    <?php if($message): ?>
-        <div class="alert success"><?= htmlspecialchars($message) ?></div>
+// Вспомогательные списки
+$products_list = $db->query("SELECT id, CONCAT(brand, ' ', name) as title FROM products WHERE status = 'active' LIMIT 100");
+$categories_list = $db->query("SELECT id, name FROM categories WHERE is_active = 1 ORDER BY name");
+
+// 6. ВЫВОД (ТЕПЕРЬ МОЖНО ПОДКЛЮЧАТЬ HEADER)
+require_once __DIR__ . '/../inc/header.php';
+?>
+
+<div class="container-fluid admin-container my-5">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h1>Управление купонами</h1>
+        <button type="button" class="btn btn-success" data-bs-toggle="modal" data-bs-target="#addCouponModal">
+            <i class="fas fa-plus"></i> Создать купон
+        </button>
+    </div>
+
+    <?php if (isset($_SESSION['success'])): ?>
+        <div class="alert alert-success alert-dismissible fade show"><?= $_SESSION['success']; unset($_SESSION['success']); ?>
+            <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+        </div>
     <?php endif; ?>
 
-    <form method="post" class="coupon-form card">
-        <div class="form-grid">
-            <div class="form-row">
-                <label>Тип скидки:</label>
-                <select name="type" class="input-select">
-                    <option value="percent">Процент</option>
-                    <option value="fixed">Фиксированная сумма</option>
-                </select>
-            </div>
-            <div class="form-row">
-                <label>Значение:</label>
-                <input type="number" name="value" min="1" step="0.01" class="input-text">
-            </div>
-            <div class="form-row">
-                <label>Тип купона:</label>
-                <select name="scope" class="input-select">
-                    <option value="global">Глобальный</option>
-                    <option value="personal">Персональный</option>
-                </select>
-            </div>
-            <div class="form-row">
-                <label>Пользователь:</label>
-                <select name="user_id" class="input-select">
-                    <option value="">—Выбрать—</option>
-                    <?php while($u = $users->fetch_assoc()): ?>
-                        <option value="<?= $u['id'] ?>"><?= htmlspecialchars($u['login']) ?></option>
-                    <?php endwhile; ?>
-                </select>
-            </div>
-            <div class="form-row">
-                <label>Применить к товару:</label>
-                <select name="product_id" class="input-select">
-                    <option value="">—Все товары—</option>
-                    <?php while($p = $products->fetch_assoc()): ?>
-                        <option value="<?= $p['id'] ?>"><?= htmlspecialchars($p['title']) ?></option>
-                    <?php endwhile; ?>
-                </select>
-            </div>
-            <div class="form-row">
-                <label>Срок действия:</label>
-                <input type="date" name="expires_at" value="<?= date('Y-m-d', strtotime('+30 days')) ?>" class="input-text">
-            </div>
-            <div class="form-row" style="grid-column: span 2;">
-                <label>Количество:</label>
-                <input type="number" name="count" min="1" value="1" class="input-text">
-            </div>
+    <div class="card mb-4 shadow-sm">
+        <div class="card-body">
+            <form method="GET" class="row g-3">
+                <div class="col-md-3">
+                    <label class="form-label">Поиск</label>
+                    <input type="text" name="search" class="form-control" value="<?= htmlspecialchars($search) ?>" placeholder="Код или название">
+                </div>
+                <div class="col-md-2">
+                    <label class="form-label">Статус</label>
+                    <select name="status" class="form-select">
+                        <option value="all">Все</option>
+                        <option value="active" <?= $filter_status == 'active' ? 'selected' : '' ?>>Активные</option>
+                        <option value="inactive" <?= $filter_status == 'inactive' ? 'selected' : '' ?>>Неактивные</option>
+                    </select>
+                </div>
+                <div class="col-md-2 d-flex align-items-end">
+                    <button type="submit" class="btn btn-primary w-100">Применить</button>
+                </div>
+            </form>
         </div>
-        <button type="submit" name="add_coupon" class="btn btn-primary full-width">Создать купон(ы)</button>
-    </form>
+    </div>
 
-    <h2 class="admin-subtitle">Список купонов</h2>
-    <table class="table card">
-        <thead>
-            <tr>
-                <th>Код</th><th>Тип</th><th>Значение</th><th>Пользователь</th>
-                <th>Товар</th><th>Срок</th><th>Статус</th><th>Действия</th>
-            </tr>
-        </thead>
-        <tbody>
-            <?php while($row = $result->fetch_assoc()): ?>
-            <tr>
-                <form method="post">
-                    <td><?= htmlspecialchars($row['code']) ?></td>
-                    <td>
-                        <select name="type" class="input-select">
-                            <option value="percent" <?= $row['discount_type']==='percent'?'selected':'' ?>>Процент</option>
-                            <option value="fixed" <?= $row['discount_type']==='fixed'?'selected':'' ?>>Фиксированная сумма</option>
-                        </select>
-                    </td>
-                    <td><input type="number" name="value" value="<?= $row['discount_value'] ?>" min="1" step="0.01" class="input-text" style="width:80px;"></td>
-                    <td>
-                        <select name="user_id" <?= $row['user_id'] ? '' : 'disabled' ?> class="input-select">
-                            <option value="">—Выбрать—</option>
-                            <?php
-                            $users2 = $db->query("SELECT id, login FROM users WHERE is_admin=0 ORDER BY login");
-                            while($u = $users2->fetch_assoc()):
-                            ?>
-                                <option value="<?= $u['id'] ?>" <?= $row['user_id']==$u['id']?'selected':'' ?>><?= htmlspecialchars($u['login']) ?></option>
-                            <?php endwhile; ?>
-                        </select>
-                    </td>
-                    <td>
-                        <select name="product_id" class="input-select">
-                            <option value="">—Все товары—</option>
-                            <?php
-                            $products2 = $db->query("SELECT id, CONCAT(brand,' ',name,' ',model) AS title FROM smartphones UNION SELECT id, CONCAT(brand,' ',name,' ',model) FROM accessories ORDER BY title ASC");
-                            while($p = $products2->fetch_assoc()):
-                            ?>
-                                <option value="<?= $p['id'] ?>" <?= $row['product_id']==$p['id']?'selected':'' ?>><?= htmlspecialchars($p['title']) ?></option>
-                            <?php endwhile; ?>
-                        </select>
-                    </td>
-                    <td><input type="date" name="expires_at" value="<?= $row['expires_at'] ?>" class="input-text"></td>
-                    <td class="<?= $row['status']==='active'?'status-active':'status-inactive' ?>"><?= ucfirst($row['status']) ?></td>
-                    <td>
-                        <input type="hidden" name="coupon_id" value="<?= $row['id'] ?>">
-                        <button type="submit" name="action" value="edit" class="btn btn-secondary">Сохранить</button>
-                        <button type="submit" name="action" value="delete" class="btn btn-danger" onclick="return confirm('Вы уверены?')">Удалить</button>
-                    </td>
-                </form>
-            </tr>
-            <?php endwhile; ?>
-        </tbody>
-    </table>
-<style>   .pagination-bar {
-    display: flex; 
-    justify-content: center;  
-    gap: 5px;
-    width: 100%;
-     margin:auto, auto;
-    flex-wrap: wrap; 
-}  </style>
-    <!-- Пагинация -->
-   
-    <div class="pagination-bar">
-        <?php if($page > 1): ?>
-            <a href="?page=<?= $page-1 ?>" class="page-btn">Предыдущая</a>
-        <?php endif; ?>
-
-        <?php
-        $start = max(1, $page - 2);
-        $end = min($totalPages, $page + 2);
-        for ($i = $start; $i <= $end; $i++): ?>
-            <a href="?page=<?= $i ?>" class="page-btn <?= $i==$page?'active':'' ?>"><?= $i ?></a>
-        <?php endfor; ?>
-
-        <?php if($page < $totalPages): ?>
-            <a href="?page=<?= $page+1 ?>" class="page-btn">Следующая</a>
-        <?php endif; ?>
+    <div class="card shadow-sm">
+        <div class="table-responsive">
+            <table class="table table-hover align-middle mb-0">
+                <thead class="table-light">
+                    <tr>
+                        <th>Код / Название</th>
+                        <th>Скидка</th>
+                        <th>Использовано</th>
+                        <th>Срок действия</th>
+                        <th>Статус</th>
+                        <th class="text-end">Действия</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <?php while ($c = $coupons->fetch_assoc()): 
+                        $is_expired = strtotime($c['expires_at']) < time();
+                    ?>
+                    <tr>
+                        <td>
+                            <strong><?= htmlspecialchars($c['code']) ?></strong><br>
+                            <small class="text-muted"><?= htmlspecialchars($c['name']) ?></small>
+                        </td>
+                        <td>
+                            <span class="badge bg-primary">
+                                <?= $c['discount_value'] ?><?= ($c['discount_type'] == 'percent' ? '%' : ' руб.') ?>
+                            </span>
+                        </td>
+                        <td><?= $c['actual_usage'] ?> / <?= $c['usage_limit'] ?: '∞' ?></td>
+                        <td>
+                            <small>С: <?= date('d.m.y', strtotime($c['starts_at'])) ?><br>До: <?= date('d.m.y', strtotime($c['expires_at'])) ?></small>
+                        </td>
+                        <td>
+                            <?php if ($is_expired): ?>
+                                <span class="badge bg-danger">Истек</span>
+                            <?php else: ?>
+                                <span class="badge bg-<?= $c['status'] == 'active' ? 'success' : 'secondary' ?>">
+                                    <?= $c['status'] == 'active' ? 'Активен' : 'Пауза' ?>
+                                </span>
+                            <?php endif; ?>
+                        </td>
+                        <td class="text-end">
+                            <div class="btn-group">
+                                <a href="?toggle_status=<?= $c['id'] ?>" class="btn btn-sm btn-outline-warning">
+                                    <i class="fas <?= $c['status'] == 'active' ? 'fa-pause' : 'fa-play' ?>"></i>
+                                </a>
+                                <a href="?delete=<?= $c['id'] ?>" class="btn btn-sm btn-outline-danger" onclick="return confirm('Удалить?')">
+                                    <i class="fas fa-trash"></i>
+                                </a>
+                            </div>
+                        </td>
+                    </tr>
+                    <?php endwhile; ?>
+                </tbody>
+            </table>
+        </div>
     </div>
 </div>
 
-<script>
-document.addEventListener('DOMContentLoaded', () => {
-    const selects = document.querySelectorAll('table select[name="type"]');
-    if (!selects.length) return;
-
-    selects.forEach(select => {
-        select.addEventListener('change', function(){
-            const row = this.closest('tr');
-            if (!row) return;
-            const input = row.querySelector('input[name="value"]');
-            if (!input) return;
-            
-            if (this.value === 'percent') {
-                input.min = 1; input.max = 100; input.step = 1;
-            } else {
-                input.min = 1; input.max = 100000; input.step = 0.01;
-            }
-        });
-    });
-});
-</script>
+<div class="modal fade" id="addCouponModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <form method="POST" class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Новый купон</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body row g-3">
+                <div class="col-md-6">
+                    <label class="form-label">Код (пусто для авто)</label>
+                    <input type="text" name="code" class="form-control">
+                </div>
+                <div class="col-md-6">
+                    <label class="form-label">Название *</label>
+                    <input type="text" name="name" class="form-control" required>
+                </div>
+                <div class="col-md-4">
+                    <label class="form-label">Тип скидки</label>
+                    <select name="discount_type" class="form-select">
+                        <option value="percent">Процент %</option>
+                        <option value="fixed">Фикс сумма</option>
+                    </select>
+                </div>
+                <div class="col-md-4">
+                    <label class="form-label">Значение *</label>
+                    <input type="number" name="discount_value" step="0.01" class="form-control" required>
+                </div>
+                <div class="col-md-4">
+                    <label class="form-label">Лимит (0 - безлим)</label>
+                    <input type="number" name="usage_limit" class="form-control">
+                </div>
+                <div class="col-md-6">
+                    <label class="form-label">Дата начала</label>
+                    <input type="date" name="starts_at" class="form-control" value="<?= date('Y-m-d') ?>">
+                </div>
+                <div class="col-md-6">
+                    <label class="form-label">Дата окончания</label>
+                    <input type="date" name="expires_at" class="form-control" value="<?= date('Y-m-d', strtotime('+1 month')) ?>">
+                </div>
+                <input type="hidden" name="type" value="global">
+            </div>
+            <div class="modal-footer">
+                <button type="submit" name="add_coupon" class="btn btn-success">Создать</button>
+            </div>
+        </form>
+    </div>
+</div>
 
 <?php require_once __DIR__ . '/../inc/footer.php'; ?>
