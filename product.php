@@ -288,7 +288,7 @@ $has_variations = count($variations) > 1;
                 </div>
             <?php endif; ?>
 
-            <!-- 🔥 ОБНОВЛЁННАЯ ФОРМА: работает через AJAX вместо обычного submit -->
+            <!-- Форма добавления в корзину -->
             <div class="cart-form mb-4" id="add-to-cart-form">
                 <input type="hidden" id="product_id" value="<?= $product_id; ?>">
                 <input type="hidden" id="selected_variation" value="<?= $variations[0]['id'] ?? '' ?>">
@@ -352,7 +352,7 @@ $has_variations = count($variations) > 1;
                     <table class="table table-striped table-hover">
                         <tbody>
                             <?php foreach ($attributes as $attr): ?>
-                                <tr>
+                                 <tr>
                                     <th style="width: 40%" class="text-muted fw-normal"><?= htmlspecialchars($attr['name']) ?></th>
                                     <td class="fw-medium">
                                         <?php 
@@ -361,7 +361,7 @@ $has_variations = count($variations) > 1;
                                         elseif ($attr['value_boolean']) echo $attr['value_boolean'] ? 'Да' : 'Нет';
                                         ?>
                                     </td>
-                                </tr>
+                                 </tr>
                             <?php endforeach; ?>
                         </tbody>
                     </table>
@@ -437,7 +437,7 @@ $has_variations = count($variations) > 1;
     width: 100%;
 }
 
-/* Вариации товара (кнопки выбора) */
+/* Вариации товара */
 .variations-list {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
@@ -482,7 +482,7 @@ $has_variations = count($variations) > 1;
     transition: all 0.2s;
 }
 
-/* Стилизация вкладок (Табы) */
+/* Стилизация вкладок */
 .product-details .nav-tabs {
     border-bottom: 2px solid #e9ecef;
 }
@@ -544,10 +544,8 @@ function changeImage(img) {
 function selectVariation(element, variationId, basePrice, stock) {
     if (element.classList.contains('out-of-stock')) return;
 
-    // Обновляем скрытое поле для корзины
     document.getElementById('selected_variation').value = variationId;
     
-    // Обновляем состояние кнопки и инпута количества
     const quantityInput = document.getElementById('quantity');
     const submitButton = document.getElementById('add-to-cart-btn');
     
@@ -560,17 +558,14 @@ function selectVariation(element, variationId, basePrice, stock) {
         submitButton.disabled = true;
     }
     
-    // Меняем стили (выделение нажатой кнопки)
     document.querySelectorAll('.variation-item').forEach(item => {
         item.classList.remove('selected', 'border-primary', 'bg-light');
     });
     element.classList.add('selected', 'border-primary', 'bg-light');
 
-    // --- ЛОГИКА ПЕРЕСЧЕТА ЦЕНЫ СО СКИДКОЙ ---
     const priceDisplay = document.getElementById('current-price-display');
     const oldPriceDisplay = document.getElementById('old-price-display');
     
-    // Забираем данные акции из PHP
     const hasPromo = <?= $promo_res ? 'true' : 'false' ?>;
     const promoType = '<?= $promo_res['type'] ?? 'percent' ?>';
     const promoValue = <?= $promo_res ? (($promo_res['discount_percent'] > 0) ? $promo_res['discount_percent'] : $promo_res['value']) : 0 ?>;
@@ -580,16 +575,13 @@ function selectVariation(element, variationId, basePrice, stock) {
 
     if (hasPromo) {
         oldPrice = basePrice;
-        // Если скидка в процентах
         if (promoType === 'percent' || <?= ($promo_res['discount_percent'] ?? 0) > 0 ? 'true' : 'false' ?>) {
             finalPrice = basePrice * (1 - (promoValue / 100));
         } else {
-            // Если скидка в рублях
             finalPrice = basePrice - promoValue;
         }
     }
 
-    // Красиво форматируем числа с пробелами
     const formatter = new Intl.NumberFormat('ru-RU');
     
     if (priceDisplay) {
@@ -601,39 +593,38 @@ function selectVariation(element, variationId, basePrice, stock) {
     }
 }
 
-// 🔥 НОВАЯ ФУНКЦИЯ: Добавление в корзину через API
+// Функция добавления в корзину через API
 function addToCartFromProduct() {
     const productId = document.getElementById('product_id').value;
     const variationId = document.getElementById('selected_variation').value;
     const quantity = document.getElementById('quantity').value;
     
-    const formData = new FormData();
-    formData.append('product_id', productId);
-    formData.append('quantity', quantity);
-    if (variationId) {
-        formData.append('variation_id', variationId);
+    const apiUrl = window.BASE_URL + 'pages/cart/Api_Cart.php?action=add';
+    
+    const params = new URLSearchParams();
+    params.append('action', 'add');
+    params.append('product_id', productId);
+    params.append('quantity', quantity);
+    if (variationId && variationId !== 'null') {
+        params.append('variation_id', variationId);
     }
     
-    fetch('pages/cart/Api_Cart.php?action=add', {
+    fetch(apiUrl, {
         method: 'POST',
-        body: formData
+        headers: {
+            'Content-Type': 'application/x-www-form-urlencoded',
+            'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').content
+        },
+        body: params.toString()
     })
     .then(response => response.json())
     .then(data => {
         if (data.success) {
-            // Обновляем счётчик корзины в шапке
             const cartCountEl = document.getElementById('cart-count');
             if (cartCountEl) {
                 cartCountEl.textContent = data.count;
             }
-            
-            // Показываем уведомление
             showToast(data.message || 'Товар добавлен в корзину');
-            
-            // Обновляем боковую панель корзины если открыта
-            if (document.getElementById('cart-sidebar') && document.getElementById('cart-sidebar').classList.contains('active')) {
-                loadCartItems();
-            }
         } else {
             showToast(data.message || 'Ошибка при добавлении', 'error');
         }
@@ -644,31 +635,39 @@ function addToCartFromProduct() {
     });
 }
 
-// 🔥 ФУНКЦИЯ ПОКАЗА УВЕДОМЛЕНИЙ
+// Функция показа уведомлений
 function showToast(message, type = 'success') {
-    // Удаляем старые тосты
-    const oldToast = document.querySelector('.toast-notification');
-    if (oldToast) oldToast.remove();
+    let toastContainer = document.getElementById('toast-container');
+    if (!toastContainer) {
+        toastContainer = document.createElement('div');
+        toastContainer.id = 'toast-container';
+        toastContainer.style.cssText = 'position: fixed; bottom: 20px; right: 20px; z-index: 9999;';
+        document.body.appendChild(toastContainer);
+    }
     
     const toast = document.createElement('div');
-    toast.className = `toast-notification alert alert-${type === 'error' ? 'danger' : 'success'} position-fixed`;
-    toast.style.cssText = 'top: 20px; right: 20px; z-index: 9999; padding: 15px 25px; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.15);';
-    toast.innerHTML = `
-        <i class="fas fa-${type === 'error' ? 'exclamation-circle' : 'check-circle'} me-2"></i>
-        ${message}
+    const colors = { success: '#28a745', error: '#dc3545', warning: '#ffc107', info: '#17a2b8' };
+    toast.style.cssText = `
+        background-color: ${colors[type] || colors.success};
+        color: ${type === 'warning' ? '#333' : 'white'};
+        padding: 12px 20px;
+        border-radius: 8px;
+        margin-bottom: 10px;
+        box-shadow: 0 2px 10px rgba(0,0,0,0.2);
+        animation: slideIn 0.3s ease;
+        cursor: pointer;
     `;
+    toast.innerHTML = `<div style="display: flex; align-items: center; gap: 10px;">
+        <i class="fas ${type === 'success' ? 'fa-check-circle' : 'fa-exclamation-circle'}"></i>
+        <span>${message}</span>
+    </div>`;
     
-    document.body.appendChild(toast);
-    
-    setTimeout(() => {
-        toast.style.opacity = '0';
-        toast.style.transform = 'translateX(100%)';
-        toast.style.transition = 'all 0.3s ease';
-        setTimeout(() => toast.remove(), 300);
-    }, 3000);
+    toast.addEventListener('click', () => toast.remove());
+    toastContainer.appendChild(toast);
+    setTimeout(() => toast.remove(), 3000);
 }
 
-// Автоматический клик по первому доступному варианту при загрузке страницы
+// Автоматический выбор первого доступного варианта
 document.addEventListener('DOMContentLoaded', function() {
     const firstAvailable = document.querySelector('.variation-item:not(.out-of-stock)');
     if (firstAvailable) {

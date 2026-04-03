@@ -1,0 +1,92 @@
+/**
+ * mobileshop/pages/cart/cart.css
+ * Стили для страницы корзины
+ */
+
+/* Контейнер корзины */
+.cart-container {
+    max-width: 1200px;
+}
+
+/* Изображение товара */
+.cart-item-image {
+    width: 60px;
+    height: 60px;
+    object-fit: contain;
+    border-radius: 4px;
+    border: 1px solid #eee;
+}
+
+/* Ячейка с количеством */
+.quantity-cell {
+    width: 150px;
+}
+
+.quantity-cell .input-group {
+    max-width: 140px;
+}
+
+.quantity-input {
+    text-align: center;
+    -moz-appearance: textfield;
+}
+
+.quantity-input::-webkit-outer-spin-button,
+.quantity-input::-webkit-inner-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+}
+
+/* Кнопки изменения количества */
+.quantity-decrease,
+.quantity-increase {
+    width: 30px;
+    padding: 0.25rem;
+}
+
+/* Цены */
+.price-cell {
+    white-space: nowrap;
+}
+
+.item-price {
+    font-size: 1.1rem;
+}
+
+/* Адаптивность */
+@media (max-width: 768px) {
+    .cart-item {
+        min-width: 200px;
+    }
+    
+    .cart-item-image {
+        width: 50px;
+        height: 50px;
+    }
+    
+    .quantity-cell {
+        width: 120px;
+    }
+    
+    .quantity-cell .input-group {
+        max-width: 110px;
+    }
+}
+
+/* Пустая корзина */
+.cart-empty-icon {
+    font-size: 4rem;
+    color: #6c757d;
+}
+
+/* Итоговая сумма */
+#final-total {
+    color: #0d6efd;
+    font-weight: 600;
+}
+
+/* Бейдж количества */
+#cart-badge {
+    font-size: 0.9rem;
+    vertical-align: middle;
+}

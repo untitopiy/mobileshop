@@ -1,9 +1,22 @@
 // inc/scripts.js - Полный файл со всеми скриптами
 
+// Глобальная конфигурация API
+const API_CONFIG = {
+    cartBaseUrl: window.BASE_URL + 'pages/cart/Api_Cart.php'
+};
+
+// Получение CSRF-токена
+function getCsrfToken() {
+    const metaToken = document.querySelector('meta[name="csrf-token"]');
+    if (metaToken) return metaToken.content;
+    const inputToken = document.querySelector('input[name="csrf_token"]');
+    if (inputToken) return inputToken.value;
+    return '';
+}
+
 // Плавная прокрутка к секциям
 document.querySelectorAll('a[href^="#"]').forEach(anchor => {
     anchor.addEventListener('click', function(e) {
-        // Проверяем, что href начинается с # и не является пустым
         const href = this.getAttribute('href');
         if (href && href.startsWith('#')) {
             e.preventDefault();
@@ -18,7 +31,7 @@ document.querySelectorAll('a[href^="#"]').forEach(anchor => {
     });
 });
 
-// Hover эффекты для карточек (добавление класса при наведении)
+// Hover эффекты для карточек
 document.querySelectorAll('.card').forEach(card => {
     card.addEventListener('mouseenter', () => {
         card.classList.add('hovered');
@@ -60,7 +73,7 @@ let compareIds = [];
 
 // Загрузка ID сравнения (с приоритетом на БД для авторизованных)
 function loadCompareIds() {
-    fetch('/mobileshop/pages/update_compare.php', {
+    fetch(window.BASE_URL + 'pages/update_compare.php', {
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
         body: 'get_ids=1'
@@ -74,7 +87,6 @@ function loadCompareIds() {
             loadCompareStatus();
             console.log('📦 Загружены ID сравнения:', compareIds);
         } else {
-            // Fallback на localStorage
             const saved = localStorage.getItem('compareIds');
             if (saved) {
                 compareIds = JSON.parse(saved);
@@ -98,8 +110,7 @@ function loadCompareIds() {
 function saveCompareIds() {
     localStorage.setItem('compareIds', JSON.stringify(compareIds));
     updateCompareCount();
-    // Синхронизируем с сервером
-    fetch('/mobileshop/pages/update_compare.php', {
+    fetch(window.BASE_URL + 'pages/update_compare.php', {
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
         body: 'ids=' + JSON.stringify(compareIds)
@@ -114,7 +125,7 @@ function updateCompareCount() {
     }
 }
 
-// Загрузка статуса сравнения для всех товаров на странице (подсветка иконок)
+// Загрузка статуса сравнения для всех товаров на странице
 function loadCompareStatus() {
     compareIds.forEach(productId => {
         const compareIcon = document.getElementById(`compare-icon-${productId}`);
@@ -127,19 +138,7 @@ function loadCompareStatus() {
 
 // Функция добавления/удаления из сравнения
 function toggleCompare(productId) {
-    const index = compareIds.indexOf(Number(productId));
-    let isAdded = false;
-    
-    if (index === -1) {
-        if (compareIds.length >= 4) {
-            showToast('Можно сравнивать не более 4 товаров', 'warning');
-            return;
-        }
-        isAdded = true;
-    }
-    
-    // Отправляем запрос на toggle
-    fetch('/mobileshop/pages/update_compare.php', {
+    fetch(window.BASE_URL + 'pages/update_compare.php', {
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
         body: 'toggle=' + productId
@@ -172,27 +171,16 @@ function toggleCompare(productId) {
     });
 }
 
-// Сохранение ID сравнения в сессию (для совместимости)
-function updateCompareSession() {
-    fetch('/mobileshop/pages/update_compare.php', {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/x-www-form-urlencoded',
-        },
-        body: 'ids=' + JSON.stringify(compareIds)
-    }).catch(e => console.error('Ошибка синхронизации сессии:', e));
-}
-
 // Переход на страницу сравнения
 function goToCompare() {
     if (compareIds.length > 0) {
-        window.location.href = '/mobileshop/pages/compare.php?ids=' + compareIds.join(',');
+        window.location.href = window.BASE_URL + 'pages/compare.php?ids=' + compareIds.join(',');
     } else {
-        window.location.href = '/mobileshop/pages/compare.php';
+        window.location.href = window.BASE_URL + 'pages/compare.php';
     }
 }
 
-// Загрузка ID сравнения из URL при загрузке страницы
+// Загрузка ID сравнения из URL
 function loadCompareFromUrl() {
     const urlParams = new URLSearchParams(window.location.search);
     const ids = urlParams.get('ids');
@@ -214,10 +202,9 @@ function loadCompareFromUrl() {
 
 // ========== ФУНКЦИИ ДЛЯ СТРАНИЦЫ СРАВНЕНИЯ ==========
 
-// Функция для удаления из сравнения на странице сравнения
 function removeFromCompare(productId) {
     if (confirm('Удалить товар из сравнения?')) {
-        fetch('/mobileshop/pages/update_compare.php', {
+        fetch(window.BASE_URL + 'pages/update_compare.php', {
             method: 'POST',
             headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
             body: 'remove=' + productId
@@ -228,17 +215,15 @@ function removeFromCompare(productId) {
                 compareIds = data.compare_ids;
                 localStorage.setItem('compareIds', JSON.stringify(compareIds));
                 updateCompareCount();
-                // Обновляем иконку на главной странице (если есть)
                 const compareIcon = document.getElementById(`compare-icon-${productId}`);
                 if (compareIcon) {
                     compareIcon.style.color = '';
                     compareIcon.classList.remove('active');
                 }
-                // Перезагружаем страницу с новыми параметрами
                 if (compareIds.length > 0) {
-                    window.location.href = '/mobileshop/pages/compare.php?ids=' + compareIds.join(',');
+                    window.location.href = window.BASE_URL + 'pages/compare.php?ids=' + compareIds.join(',');
                 } else {
-                    window.location.href = '/mobileshop/pages/compare.php';
+                    window.location.href = window.BASE_URL + 'pages/compare.php';
                 }
             } else {
                 alert(data.message || 'Ошибка при удалении');
@@ -251,10 +236,9 @@ function removeFromCompare(productId) {
     }
 }
 
-// Функция для очистки всего сравнения
 function clearAllCompare() {
     if (confirm('Очистить все товары из сравнения?')) {
-        fetch('/mobileshop/pages/update_compare.php', {
+        fetch(window.BASE_URL + 'pages/update_compare.php', {
             method: 'POST',
             headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
             body: 'clear_all=1'
@@ -265,13 +249,12 @@ function clearAllCompare() {
                 compareIds = [];
                 localStorage.removeItem('compareIds');
                 updateCompareCount();
-                // Очищаем все иконки на главной странице
                 document.querySelectorAll('[id^="compare-icon-"]').forEach(icon => {
                     icon.style.color = '';
                     icon.classList.remove('active');
                 });
                 showToast('Сравнение очищено', 'success');
-                window.location.href = '/mobileshop/pages/compare.php';
+                window.location.href = window.BASE_URL + 'pages/compare.php';
             } else {
                 alert(data.message || 'Ошибка при очистке');
             }
@@ -285,9 +268,8 @@ function clearAllCompare() {
 
 // ========== ФУНКЦИИ ДЛЯ ИЗБРАННОГО ==========
 
-// Загрузка статуса избранного для всех товаров на странице
 function loadWishlistStatus() {
-    fetch('/mobileshop/pages/wishlist.php?ajax_list=1')
+    fetch(window.BASE_URL + 'pages/wishlist.php?ajax_list=1')
         .then(response => response.json())
         .then(data => {
             if (data.success && data.wishlist) {
@@ -304,32 +286,26 @@ function loadWishlistStatus() {
         .catch(error => console.error('Error:', error));
 }
 
-// Функция добавления/удаления из избранного
 function toggleWishlist(productId) {
-    // Проверяем авторизацию через AJAX
-    fetch('/mobileshop/pages/wishlist.php?check_auth=1')
+    fetch(window.BASE_URL + 'pages/wishlist.php?check_auth=1')
         .then(response => response.json())
         .then(data => {
             if (!data.authenticated) {
                 showToast('Необходимо авторизоваться', 'warning');
                 setTimeout(() => {
-                    window.location.href = '/mobileshop/pages/auth.php';
+                    window.location.href = window.BASE_URL + 'pages/auth.php';
                 }, 1500);
                 return;
             }
             
-            // Отправляем запрос на добавление/удаление
-            fetch('/mobileshop/pages/wishlist.php', {
+            fetch(window.BASE_URL + 'pages/wishlist.php', {
                 method: 'POST',
-                headers: {
-                    'Content-Type': 'application/x-www-form-urlencoded',
-                },
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
                 body: 'ajax_add_wishlist=1&product_id=' + productId
             })
             .then(response => response.json())
             .then(data => {
                 if (data.success) {
-                    // Обновляем иконку сразу
                     const icon = document.getElementById(`wishlist-icon-${productId}`);
                     if (icon) {
                         if (data.action === 'added') {
@@ -353,9 +329,8 @@ function toggleWishlist(productId) {
         });
 }
 
-// Обновление счетчика избранного
 function updateWishlistCount() {
-    fetch('/mobileshop/pages/wishlist.php?ajax_count=1')
+    fetch(window.BASE_URL + 'pages/wishlist.php?ajax_count=1')
         .then(response => response.json())
         .then(data => {
             const badge = document.getElementById('wishlist-count');
@@ -366,34 +341,31 @@ function updateWishlistCount() {
         .catch(error => console.error('Error:', error));
 }
 
-// ========== 🔥 ИСПРАВЛЕННЫЕ ФУНКЦИИ ДЛЯ КОРЗИНЫ ==========
+// ========== ФУНКЦИИ ДЛЯ КОРЗИНЫ ==========
 
-/**
- * Добавление товара в корзину
- */
 function addToCart(productId, variationId = null, quantity = 1) {
-    console.log('🛒 addToCart:', {productId, variationId, quantity});
+    console.log('🛒 addToCart called:', {productId, variationId, quantity});
     
-    // Формируем данные
-    const formData = new URLSearchParams();
-    formData.append('product_id', productId);
-    formData.append('quantity', quantity);
+    const params = new URLSearchParams();
+    params.append('action', 'add');
+    params.append('product_id', productId);
+    params.append('quantity', quantity);
     if (variationId && variationId !== 'null' && variationId !== '') {
-        formData.append('variation_id', variationId);
+        params.append('variation_id', variationId);
     }
     
-    // Отправляем запрос
-    fetch('/mobileshop/pages/cart/Api_Cart.php?action=add', {
+    fetch(API_CONFIG.cartBaseUrl + '?action=add', {
         method: 'POST',
         headers: {
             'Content-Type': 'application/x-www-form-urlencoded',
+            'X-CSRF-TOKEN': getCsrfToken()
         },
-        body: formData.toString()
+        body: params.toString()
     })
     .then(response => {
         console.log('📡 Response status:', response.status);
         if (!response.ok) {
-            throw new Error('HTTP ' + response.status);
+            throw new Error('HTTP error! status: ' + response.status);
         }
         return response.json();
     })
@@ -401,11 +373,10 @@ function addToCart(productId, variationId = null, quantity = 1) {
         console.log('✅ Response data:', data);
         
         if (data.success) {
-            // Обновляем счётчик
             updateCartCountDisplay(data.count);
-            showToast(data.message, 'success');
+            showToast(data.message || 'Товар добавлен в корзину', 'success');
         } else {
-            showToast(data.message || 'Ошибка добавления', 'error');
+            showToast(data.message || 'Ошибка при добавлении', 'error');
         }
     })
     .catch(error => {
@@ -414,36 +385,27 @@ function addToCart(productId, variationId = null, quantity = 1) {
     });
 }
 
-/**
- * Обновление отображения счётчика корзины
- */
 function updateCartCountDisplay(count) {
     console.log('🔢 Updating cart count:', count);
     
-    // Ищем все возможные элементы
-    const selectors = [
-        '#cart-count',
-        '#cart-badge', 
-        '.cart-count',
-        '.header-cart-count'
-    ];
+    const selectors = ['#cart-count', '#cart-badge', '.cart-count', '.header-cart-count'];
     
     selectors.forEach(selector => {
         const elements = document.querySelectorAll(selector);
         elements.forEach(el => {
             el.textContent = count;
-            // Добавляем анимацию
             el.style.transform = 'scale(1.3)';
             setTimeout(() => el.style.transform = 'scale(1)', 200);
         });
     });
 }
 
-/**
- * Получение количества товаров в корзине
- */
 function updateCartCount() {
-    fetch('/mobileshop/pages/cart/Api_Cart.php?action=count')
+    fetch(API_CONFIG.cartBaseUrl + '?action=count', {
+        headers: {
+            'X-CSRF-TOKEN': getCsrfToken()
+        }
+    })
     .then(response => response.json())
     .then(data => {
         if (data.success && data.count !== undefined) {
@@ -453,181 +415,6 @@ function updateCartCount() {
     .catch(error => console.error('Error updating cart count:', error));
 }
 
-// Инициализация при загрузке
-document.addEventListener('DOMContentLoaded', function() {
-    updateCartCount();
-});
-
-// Общая функция для действий (используется в index.php)
-function toggleAction(type, productId) {
-    if (type === 'wishlist') {
-        toggleWishlist(productId);
-    } else if (type === 'compare') {
-        toggleCompare(productId);
-    }
-}
-
-// Сброс фильтров
-function resetFilters() {
-    const priceMin = document.getElementById('price-min');
-    const priceMax = document.getElementById('price-max');
-    if (priceMin) priceMin.value = '';
-    if (priceMax) priceMax.value = '';
-    showToast('Фильтры сброшены', 'info');
-}
-
-// ========== ФУНКЦИИ ДЛЯ ОТЗЫВОВ ==========
-
-function toggleLike(reviewId, button) {
-    fetch(`pages/like_review.php?review_id=${reviewId}`)
-        .then(response => response.json())
-        .then(data => {
-            if (data.status === 'success') {
-                const likesCount = button.querySelector('.likes-count');
-                const currentLikes = parseInt(likesCount.textContent);
-                
-                if (data.action === 'liked') {
-                    likesCount.textContent = currentLikes + 1;
-                    button.classList.add('liked');
-                } else {
-                    likesCount.textContent = currentLikes - 1;
-                    button.classList.remove('liked');
-                }
-            } else {
-                alert('Ошибка: ' + (data.message || 'Неизвестная ошибка'));
-            }
-        })
-        .catch(error => {
-            console.error('Error:', error);
-            alert('Ошибка при оценке отзыва');
-        });
-}
-
-// Инициализация лайков дизлайков для отзывов
-function initReviewLikes() {
-    document.querySelectorAll('.btn-like-review, .btn-dislike-review').forEach(button => {
-        button.addEventListener('click', function(e) {
-            e.preventDefault();
-            
-            const reviewId = this.dataset.reviewId;
-            const action = this.dataset.action;
-            
-            const container = this.closest('.review-actions') || this.parentElement;
-            const likesCountElement = container.querySelector('.likes-count');
-            const dislikesCountElement = container.querySelector('.dislikes-count');
-            
-            const originalHTML = this.innerHTML;
-            this.innerHTML = '<span class="spinner-border spinner-border-sm"></span>';
-            this.disabled = true;
-            
-            fetch(`pages/like_review.php?review_id=${reviewId}&action=${action}`)
-                .then(response => {
-                    if (!response.ok) throw new Error('Network response was not ok');
-                    return response.json();
-                })
-                .then(data => {
-                    if (data.status === 'success') {
-                        if (likesCountElement) likesCountElement.textContent = data.likes_count;
-                        if (dislikesCountElement) dislikesCountElement.textContent = data.dislikes_count;
-
-                        container.querySelectorAll('.btn-like-review, .btn-dislike-review').forEach(btn => {
-                            btn.classList.remove('active');
-                        });
-
-                        if (data.action !== 'removed') {
-                            this.classList.add('active');
-                        }
-
-                        const msg = data.action === 'disliked' ? 'Дизлайк засчитан' : 'Спасибо за оценку!';
-                        showToast(msg, 'success');
-                    } else {
-                        showToast('Ошибка: ' + (data.message || 'Неизвестная ошибка'), 'error');
-                    }
-                })
-                .catch(error => {
-                    console.error('Error:', error);
-                    showToast('Ошибка соединения с сервером', 'error');
-                })
-                .finally(() => {
-                    this.innerHTML = originalHTML;
-                    this.disabled = false;
-                });
-        });
-    });
-}
-
-// Инициализация звездного рейтинга в форме
-function initRatingInputs() {
-    document.querySelectorAll('.rating-input').forEach(container => {
-        const stars = container.querySelectorAll('input[type="radio"]');
-        const labels = container.querySelectorAll('label');
-        
-        stars.forEach((star, index) => {
-            star.addEventListener('change', function() {
-                labels.forEach(label => label.style.color = '#ddd');
-                for (let i = 0; i <= index; i++) {
-                    labels[i].style.color = '#ffc107';
-                }
-            });
-            
-            labels[index].addEventListener('mouseenter', function() {
-                for (let i = 0; i <= index; i++) {
-                    labels[i].style.color = '#ffc107';
-                }
-                for (let i = index + 1; i < labels.length; i++) {
-                    labels[i].style.color = '#ddd';
-                }
-            });
-        });
-        
-        container.addEventListener('mouseleave', function() {
-            const checkedStar = container.querySelector('input:checked');
-            if (checkedStar) {
-                const index = Array.from(stars).indexOf(checkedStar);
-                for (let i = 0; i <= index; i++) {
-                    labels[i].style.color = '#ffc107';
-                }
-                for (let i = index + 1; i < labels.length; i++) {
-                    labels[i].style.color = '#ddd';
-                }
-            } else {
-                labels.forEach(label => label.style.color = '#ddd');
-            }
-        });
-    });
-}
-
-// Инициализация галереи изображений
-function initImageGallery() {
-    document.querySelectorAll('.thumbnail-gallery img').forEach((thumb, index) => {
-        thumb.setAttribute('tabindex', '0');
-        thumb.addEventListener('keypress', function(e) {
-            if (e.key === 'Enter' || e.key === ' ') {
-                e.preventDefault();
-                if (typeof changeImage === 'function') {
-                    changeImage(this);
-                }
-            }
-        });
-        
-        thumb.addEventListener('keydown', function(e) {
-            if (e.key === 'ArrowRight') {
-                e.preventDefault();
-                const next = this.parentElement.nextElementSibling;
-                if (next && next.querySelector('img')) {
-                    next.querySelector('img').focus();
-                }
-            } else if (e.key === 'ArrowLeft') {
-                e.preventDefault();
-                const prev = this.parentElement.previousElementSibling;
-                if (prev && prev.querySelector('img')) {
-                    prev.querySelector('img').focus();
-                }
-            }
-        });
-    });
-}
-
 // ========== ФУНКЦИЯ ДЛЯ УВЕДОМЛЕНИЙ (TOAST) ==========
 
 function showToast(message, type = 'success') {
@@ -635,36 +422,35 @@ function showToast(message, type = 'success') {
     if (!toastContainer) {
         toastContainer = document.createElement('div');
         toastContainer.id = 'toast-container';
-        toastContainer.style.position = 'fixed';
-        toastContainer.style.bottom = '20px';
-        toastContainer.style.right = '20px';
-        toastContainer.style.zIndex = '9999';
+        toastContainer.style.cssText = 'position: fixed; bottom: 20px; right: 20px; z-index: 9999;';
         document.body.appendChild(toastContainer);
     }
     
     const toast = document.createElement('div');
-    toast.className = `custom-toast toast-${type}`;
-    toast.innerHTML = `
-        <div class="toast-content">
-            <i class="fas ${type === 'success' ? 'fa-check-circle' : type === 'error' ? 'fa-exclamation-circle' : 'fa-info-circle'}"></i>
-            <span>${message}</span>
-        </div>
-    `;
-    
     const colors = {
         success: '#28a745',
         error: '#dc3545',
         warning: '#ffc107',
         info: '#17a2b8'
     };
-    toast.style.backgroundColor = colors[type] || colors.info;
-    toast.style.color = type === 'warning' ? '#333' : 'white';
-    toast.style.padding = '12px 20px';
-    toast.style.borderRadius = '8px';
-    toast.style.marginBottom = '10px';
-    toast.style.boxShadow = '0 2px 10px rgba(0,0,0,0.2)';
-    toast.style.animation = 'slideIn 0.3s ease';
-    toast.style.cursor = 'pointer';
+    
+    toast.style.cssText = `
+        background-color: ${colors[type] || colors.success};
+        color: ${type === 'warning' ? '#333' : 'white'};
+        padding: 12px 20px;
+        border-radius: 8px;
+        margin-bottom: 10px;
+        box-shadow: 0 2px 10px rgba(0,0,0,0.2);
+        animation: slideIn 0.3s ease;
+        cursor: pointer;
+    `;
+    
+    toast.innerHTML = `
+        <div style="display: flex; align-items: center; gap: 10px;">
+            <i class="fas ${type === 'success' ? 'fa-check-circle' : type === 'error' ? 'fa-exclamation-circle' : 'fa-info-circle'}"></i>
+            <span>${message}</span>
+        </div>
+    `;
     
     toast.addEventListener('click', () => {
         toast.style.animation = 'slideOut 0.3s ease';
@@ -679,6 +465,16 @@ function showToast(message, type = 'success') {
             setTimeout(() => toast.remove(), 300);
         }
     }, 3000);
+}
+
+// ========== ОБЩАЯ ФУНКЦИЯ ДЛЯ ДЕЙСТВИЙ ==========
+
+function toggleAction(type, productId) {
+    if (type === 'wishlist') {
+        toggleWishlist(productId);
+    } else if (type === 'compare') {
+        toggleCompare(productId);
+    }
 }
 
 // ========== ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ==========
@@ -708,11 +504,9 @@ function initFormConfirmations() {
 
 function removeFromWishlist(productId) {
     if (confirm('Удалить товар из избранного?')) {
-        fetch('/mobileshop/pages/wishlist.php', {
+        fetch(window.BASE_URL + 'pages/wishlist.php', {
             method: 'POST',
-            headers: {
-                'Content-Type': 'application/x-www-form-urlencoded',
-            },
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
             body: 'ajax_add_wishlist=1&product_id=' + productId
         })
         .then(response => response.json())
@@ -743,11 +537,9 @@ function clearAllWishlist() {
         
         removeButtons.forEach(btn => {
             const productId = btn.dataset.productId;
-            fetch('/mobileshop/pages/wishlist.php', {
+            fetch(window.BASE_URL + 'pages/wishlist.php', {
                 method: 'POST',
-                headers: {
-                    'Content-Type': 'application/x-www-form-urlencoded',
-                },
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
                 body: 'ajax_add_wishlist=1&product_id=' + productId
             })
             .then(response => response.json())
@@ -778,7 +570,7 @@ function initLiveSearch() {
         const query = this.value.trim();
 
         if (query.length >= 2) {
-            fetch('search_ajax.php?q=' + encodeURIComponent(query))
+            fetch(window.BASE_URL + 'search_ajax.php?q=' + encodeURIComponent(query))
                 .then(response => {
                     if (!response.ok) throw new Error('Ошибка сети');
                     return response.text();
@@ -808,30 +600,27 @@ function syncCompareOnLoad() {
     const localCompareIds = localIds ? JSON.parse(localIds) : [];
     
     if (localCompareIds.length > 0 && window.location.pathname.includes('compare.php') && !window.location.search.includes('ids=')) {
-        window.location.href = '/mobileshop/pages/compare.php?ids=' + localCompareIds.join(',');
+        window.location.href = window.BASE_URL + 'pages/compare.php?ids=' + localCompareIds.join(',');
     }
 }
 
 // ========== ИНИЦИАЛИЗАЦИЯ ПРИ ЗАГРУЗКЕ ==========
 
 document.addEventListener('DOMContentLoaded', function() {
-    // Инициализация отзывов
-    initReviewLikes();
-    initRatingInputs();
-    initImageGallery();
-    initFormConfirmations();
-    initLiveSearch();
+    // Инициализация корзины
+    updateCartCount();
     
     // Инициализация избранного и сравнения
     loadCompareIds();
     loadCompareStatus();
     loadWishlistStatus();
     updateWishlistCount();
-    updateCartCount();
     loadCompareFromUrl();
-    
-    // Синхронизация для страницы сравнения
     syncCompareOnLoad();
+    
+    // Инициализация отзывов
+    initFormConfirmations();
+    initLiveSearch();
     
     // Каталог-меню
     const trigger = document.getElementById('catalog-trigger');
@@ -856,39 +645,12 @@ document.addEventListener('DOMContentLoaded', function() {
 const style = document.createElement('style');
 style.textContent = `
     @keyframes slideIn {
-        from {
-            transform: translateX(100%);
-            opacity: 0;
-        }
-        to {
-            transform: translateX(0);
-            opacity: 1;
-        }
+        from { transform: translateX(100%); opacity: 0; }
+        to { transform: translateX(0); opacity: 1; }
     }
     @keyframes slideOut {
-        from {
-            transform: translateX(0);
-            opacity: 1;
-        }
-        to {
-            transform: translateX(100%);
-            opacity: 0;
-        }
-    }
-    .custom-toast {
-        font-family: inherit;
-        font-size: 14px;
-        min-width: 200px;
-        max-width: 300px;
-        word-wrap: break-word;
-    }
-    .custom-toast .toast-content {
-        display: flex;
-        align-items: center;
-        gap: 10px;
-    }
-    .custom-toast .toast-content i {
-        font-size: 18px;
+        from { transform: translateX(0); opacity: 1; }
+        to { transform: translateX(100%); opacity: 0; }
     }
 `;
 document.head.appendChild(style);
