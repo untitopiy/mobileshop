@@ -25,9 +25,21 @@ header('Content-Type: application/json; charset=utf-8');
 
 // --- CSRF ЗАЩИТА ---
 if ($_SERVER['REQUEST_METHOD'] !== 'GET') {
-    $headers = getallheaders();
-    $csrf_token = $_POST['csrf_token'] ?? $headers['X-CSRF-TOKEN'] ?? null;
+    $csrf_token = null;
     
+    // Пробуем получить токен из разных источников
+    if (isset($_POST['csrf_token'])) {
+        $csrf_token = $_POST['csrf_token'];
+    } elseif (isset($_GET['csrf_token'])) {
+        $csrf_token = $_GET['csrf_token'];
+    } else {
+        $headers = getallheaders();
+        if (isset($headers['X-CSRF-TOKEN'])) {
+            $csrf_token = $headers['X-CSRF-TOKEN'];
+        }
+    }
+    
+    // Проверяем токен
     if (!isset($_SESSION['csrf_token']) || !hash_equals($_SESSION['csrf_token'], $csrf_token)) {
         jsonResponse(false, 'Недействительный CSRF-токен');
         exit;
@@ -56,6 +68,9 @@ try {
             break;
         case 'update':
             handleUpdate($cartHelper, $guestService, $user_id);
+            break;
+        case 'save_shipping':
+            handleSaveShipping();
             break;
         default:
             jsonResponse(false, 'Неизвестное действие: ' . $action);
@@ -149,6 +164,23 @@ function handleUpdate(CartHelper $cartHelper, GuestCartService $guestService, $u
     }
     
     jsonResponse(true, 'Обновлено', ['count' => $cartHelper->getCartCount($user_id)]);
+}
+
+function handleSaveShipping() {
+    $shipping_method = (int)($_POST['shipping_method'] ?? 0);
+    $shipping_price = (float)($_POST['shipping_price'] ?? 0);
+    
+    if ($shipping_method > 0) {
+        $_SESSION['selected_shipping_method'] = $shipping_method;
+        $_SESSION['selected_shipping_price'] = $shipping_price;
+        
+        jsonResponse(true, 'Способ доставки сохранен', [
+            'method' => $shipping_method,
+            'price' => $shipping_price
+        ]);
+    } else {
+        jsonResponse(false, 'Некорректный способ доставки');
+    }
 }
 
 // ========== ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ==========

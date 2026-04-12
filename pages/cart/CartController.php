@@ -18,6 +18,7 @@ class CartController {
         $this->guestService = new GuestCartService($db, $_SESSION);
         $this->userId = $_SESSION['id'] ?? null;
         
+        // Генерируем CSRF-токен если его нет
         if (empty($_SESSION['csrf_token'])) {
             $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
         }
@@ -165,10 +166,17 @@ class CartController {
     
     private function verifyCsrf(): bool {
         $token = $_POST['csrf_token'] ?? '';
-        return hash_equals($_SESSION['csrf_token'] ?? '', $token);
+        $sessionToken = $_SESSION['csrf_token'] ?? '';
+        
+        if (empty($token) || empty($sessionToken)) {
+            return false;
+        }
+        
+        return hash_equals($sessionToken, $token);
     }
     
     private function handlePostRequest(): void {
+        // Проверяем CSRF только для не-AJAX запросов
         if (!$this->isAjaxRequest() && !$this->verifyCsrf()) {
             $_SESSION['error'] = "Недействительный CSRF-токен";
             header("Location: cart.php");
