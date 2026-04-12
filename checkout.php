@@ -1,10 +1,16 @@
 <?php
+/**
+ * mobileshop/checkout.php
+ * Оформление заказа
+ */
+
+// ВАЖНО: Вся логика с session_start() и header() ДО ЛЮБОГО ВЫВОДА
 session_start();
-require_once __DIR__ . '/inc/header.php';
+
 require_once __DIR__ . '/inc/db.php';
 require_once __DIR__ . '/inc/functions.php';
 
-// Проверка авторизации пользователя
+// Проверка авторизации пользователя — ДО подключения header.php
 if (!isset($_SESSION['id'])) {
     $_SESSION['redirect_after_login'] = 'checkout.php';
     header("Location: pages/auth.php");
@@ -93,14 +99,69 @@ while ($row = $cart_result->fetch_assoc()) {
     $sellers[$row['seller_id']]['subtotal'] += $row['subtotal'];
 }
 
-// Если корзина пуста, перенаправляем
+// Если корзина пуста, перенаправляем — ДО header.php
 if (empty($cart_items)) {
-    header("Location: cart.php");
+    header("Location: pages/cart/cart.php");
     exit;
 }
 
-// Получаем способы доставки и оплаты
-$shipping_methods = getShippingMethods($db);
+// ИСПРАВЛЕНО: Унифицированные способы доставки (те же что и в корзине)
+function getUnifiedShippingMethods($totalPrice = 0) {
+    return [
+        [
+            'id' => 1,
+            'name' => 'Самовывоз из магазина',
+            'code' => 'pickup',
+            'price' => 0.00,
+            'free_from' => null,
+            'estimated_days_min' => 1,
+            'estimated_days_max' => 1,
+            'description' => 'Заберите заказ в нашем магазине'
+        ],
+        [
+            'id' => 2,
+            'name' => 'Курьер по Минску',
+            'code' => 'courier_minsk',
+            'price' => 10.00,
+            'free_from' => 500.00,
+            'estimated_days_min' => 1,
+            'estimated_days_max' => 2,
+            'description' => 'Доставка курьером по Минску'
+        ],
+        [
+            'id' => 3,
+            'name' => 'Белпочта',
+            'code' => 'belpost',
+            'price' => 15.00,
+            'free_from' => null,
+            'estimated_days_min' => 3,
+            'estimated_days_max' => 7,
+            'description' => 'Доставка в отделение Белпочты'
+        ],
+        [
+            'id' => 4,
+            'name' => 'Европочта',
+            'code' => 'europost',
+            'price' => 12.00,
+            'free_from' => 300.00,
+            'estimated_days_min' => 2,
+            'estimated_days_max' => 4,
+            'description' => 'Доставка в отделение Европочты'
+        ],
+        [
+            'id' => 5,
+            'name' => 'DHL Express',
+            'code' => 'dhl',
+            'price' => 50.00,
+            'free_from' => null,
+            'estimated_days_min' => 1,
+            'estimated_days_max' => 3,
+            'description' => 'Экспресс-доставка по всему миру'
+        ]
+    ];
+}
+
+$shipping_methods = getUnifiedShippingMethods($total_price);
 $payment_methods = getPaymentMethods($db);
 
 // Получаем информацию о пользователе
@@ -185,7 +246,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['checkout'])) {
         foreach ($shipping_methods as $method) {
             if ($method['id'] == $shipping_method_id) {
                 $selected_shipping = $method;
-                $shipping_price = $method['price'];
+                // ИСПРАВЛЕНО: Расчет цены доставки с учетом бесплатной доставки
+                if ($method['free_from'] && $total_price >= $method['free_from']) {
+                    $shipping_price = 0;
+                } else {
+                    $shipping_price = $method['price'];
+                }
                 $shipping_valid = true;
                 break;
             }
@@ -480,12 +546,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['checkout'])) {
             // Подтверждаем транзакцию
             $db->commit();
 
-            // Очищаем сессионную корзину
+            // Очищаем сессионную корзину и данные о доставке
             $_SESSION['cart'] = [];
+            // Очищаем сохраненный способ доставки после успешного заказа
+            unset($_SESSION['selected_shipping_method']);
+            unset($_SESSION['selected_shipping_price']);
             
-            // Перенаправляем на страницу успеха
-            echo "<script>window.location.href = 'success.php?order_id=$order_id';</script>";
-            // header("Location: success.php?order_id=$order_id");
+            // Перенаправляем на страницу успеха — ДО header.php!
+            header("Location: success.php?order_id=$order_id");
             exit;
 
         } catch (Exception $e) {
@@ -494,6 +562,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['checkout'])) {
         }
     }
 }
+
+// ТОЛЬКО ТЕПЕРЬ подключаем header.php, когда все header() вызваны
+require_once __DIR__ . '/inc/header.php';
 ?>
 
 <div class="container checkout-container py-4">
@@ -580,38 +651,53 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['checkout'])) {
                     </div>
                 </div>
 
+                <!-- ===== СПОСОБЫ ДОСТАВКИ (ИСПРАВЛЕННЫЙ ДИНАМИЧЕСКИЙ БЛОК) ===== -->
                 <div class="card mb-4">
                     <div class="card-header">
-                        <h5 class="mb-0"><i class="fas fa-truck me-2"></i>Способ доставки</h5>
+                        <h5 class="mb-0"><i class="fas fa-truck me-2"></i>Способы доставки</h5>
                     </div>
-                    <div class="card-body">
+                    <div class="card-body" id="shipping-methods-container">
                         <?php foreach ($shipping_methods as $method): ?>
-                            <div class="form-check mb-3">
-                                <input class="form-check-input" type="radio" name="shipping_method" 
-                                       id="shipping_<?= $method['id'] ?>" value="<?= $method['id'] ?>"
+                            <?php 
+                                $isFree = $method['free_from'] && $total_price >= $method['free_from'];
+                                $displayPrice = $isFree ? 0 : $method['price'];
+                                $badgeClass = $isFree ? 'success' : 'primary';
+                                $badgeText = $isFree 
+                                    ? 'Бесплатно' . ($method['free_from'] ? ' (от ' . number_format($method['free_from'], 0, ',', ' ') . ' руб.)' : '')
+                                    : number_format($method['price'], 0, ',', ' ') . ' руб.';
+                                $daysText = $method['estimated_days_min'] == $method['estimated_days_max'] 
+                                    ? $method['estimated_days_min'] . ' день' 
+                                    : $method['estimated_days_min'] . '-' . $method['estimated_days_max'] . ' дней';
+                            ?>
+                            <div class="form-check mb-3 shipping-option <?= ($form_data['shipping_method'] == $method['id']) ? 'border-primary bg-light' : '' ?>" 
+                                 data-price="<?= $displayPrice ?>"
+                                 data-method-id="<?= $method['id'] ?>"
+                                 data-free-from="<?= $method['free_from'] ?? 0 ?>">
+                                <input class="form-check-input shipping-radio" 
+                                       type="radio" 
+                                       name="shipping_method" 
+                                       id="shipping_<?= $method['id'] ?>" 
+                                       value="<?= $method['id'] ?>"
+                                       data-price="<?= $method['price'] ?>"
+                                       data-free-from="<?= $method['free_from'] ?? 0 ?>"
                                        <?= ($form_data['shipping_method'] == $method['id']) ? 'checked' : '' ?>>
-                                <label class="form-check-label" for="shipping_<?= $method['id'] ?>">
-                                    <strong><?= htmlspecialchars($method['name']) ?></strong>
-                                    <?php if ($method['price'] > 0): ?>
-                                        - <?= formatPrice($method['price']) ?>
-                                    <?php else: ?>
-                                        - Бесплатно
-                                    <?php endif; ?>
-                                    <?php if ($method['estimated_days_min']): ?>
-                                        <br>
-                                        <small class="text-muted">
-                                            Срок доставки: <?= $method['estimated_days_min'] ?>-<?= $method['estimated_days_max'] ?> дней
-                                        </small>
-                                    <?php endif; ?>
-                                    <?php if ($method['free_from'] && $total_price >= $method['free_from']): ?>
-                                        <br>
-                                        <small class="text-success">Бесплатно при заказе от <?= formatPrice($method['free_from']) ?></small>
-                                    <?php endif; ?>
+                                <label class="form-check-label w-100" for="shipping_<?= $method['id'] ?>">
+                                    <div class="d-flex justify-content-between align-items-start">
+                                        <div>
+                                            <strong><?= htmlspecialchars($method['name']) ?></strong>
+                                            <small class="text-muted d-block"><?= $daysText ?></small>
+                                            <small class="text-muted d-block"><?= htmlspecialchars($method['description']) ?></small>
+                                        </div>
+                                        <span class="badge bg-<?= $badgeClass ?> ms-2 shipping-badge" id="badge-<?= $method['id'] ?>">
+                                            <?= $badgeText ?>
+                                        </span>
+                                    </div>
                                 </label>
                             </div>
                         <?php endforeach; ?>
                     </div>
                 </div>
+                <!-- ===== КОНЕЦ СПОСОБОВ ДОСТАВКИ ===== -->
 
                 <div class="card mb-4">
                     <div class="card-header">
@@ -644,6 +730,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['checkout'])) {
                                    placeholder="Введите код купона" 
                                    value="<?= htmlspecialchars($form_data['coupon_code']) ?>">
                             <button class="btn btn-outline-primary" type="button" id="apply-coupon">Применить</button>
+                        </div>
+                        <div id="coupon-message" class="mt-2"></div>
+                        <div id="coupon-details" class="mt-2 d-none"></div>
+                        <div id="coupon-spinner" class="mt-2 d-none">
+                            <i class="fas fa-spinner fa-spin"></i> Проверка купона...
                         </div>
                     </div>
                 </div>
@@ -702,11 +793,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['checkout'])) {
 
                     <div class="d-flex justify-content-between mb-2">
                         <span>Товары:</span>
-                        <span><?= formatPrice($total_price) ?></span>
+                        <span id="items-total" data-raw-price="<?= $total_price ?>"><?= formatPrice($total_price) ?></span>
                     </div>
                     <div class="d-flex justify-content-between mb-2">
                         <span>Доставка:</span>
-                        <span class="shipping-price">будет рассчитана</span>
+                        <span class="shipping-price" id="shipping-price-display">Бесплатно</span>
                     </div>
                     <div class="d-flex justify-content-between mb-2 coupon-row" style="display: none;">
                         <span>Скидка по купону:</span>
@@ -731,63 +822,332 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['checkout'])) {
 </div>
 
 <script>
+// Передаем сохраненный способ доставки из сессии в JavaScript
+const preselectedShippingFromSession = <?= json_encode($_SESSION['selected_shipping_method'] ?? null) ?>;
+const preselectedShippingPriceFromSession = <?= json_encode($_SESSION['selected_shipping_price'] ?? null) ?>;
+const shippingMethodsData = <?= json_encode($shipping_methods) ?>;
+
 document.addEventListener('DOMContentLoaded', function() {
-    const shippingInputs = document.querySelectorAll('input[name="shipping_method"]');
-    const shippingPriceSpan = document.querySelector('.shipping-price');
+    const shippingInputs = document.querySelectorAll('.shipping-radio');
+    const shippingPriceSpan = document.getElementById('shipping-price-display');
     const finalTotalSpan = document.getElementById('final-total');
+    const itemsTotalEl = document.getElementById('items-total');
     const couponRow = document.querySelector('.coupon-row');
     const couponDiscountSpan = document.querySelector('.coupon-discount');
     const applyCouponBtn = document.getElementById('apply-coupon');
     const couponInput = document.querySelector('input[name="coupon_code"]');
     
-    const totalPrice = <?= $total_price ?>;
+    const totalPrice = parseFloat(itemsTotalEl.dataset.rawPrice) || 0;
     let shippingPrice = 0;
     let couponDiscount = 0;
     
-    // Обновление стоимости доставки
+    // Форматирование цены
+    function formatPrice(price) {
+        return Math.round(price).toLocaleString('ru-RU') + ' руб.';
+    }
+    
+    // Обновление итоговых сумм
     function updateTotals() {
         const finalTotal = totalPrice + shippingPrice - couponDiscount;
-        finalTotalSpan.textContent = formatPrice(finalTotal);
         
-        if (couponDiscount > 0) {
-            couponRow.style.display = 'flex';
-            couponDiscountSpan.textContent = '-' + formatPrice(couponDiscount);
-        } else {
-            couponRow.style.display = 'none';
+        // Обновляем отображение доставки
+        if (shippingPriceSpan) {
+            shippingPriceSpan.textContent = shippingPrice === 0 ? 'Бесплатно' : formatPrice(shippingPrice);
+            shippingPriceSpan.className = shippingPrice === 0 ? 'shipping-price text-success' : 'shipping-price';
+        }
+        
+        // Обновляем итог с анимацией
+        if (finalTotalSpan) {
+            finalTotalSpan.style.transform = 'scale(1.05)';
+            finalTotalSpan.textContent = formatPrice(finalTotal);
+            setTimeout(() => {
+                finalTotalSpan.style.transform = 'scale(1)';
+            }, 200);
+        }
+        
+        // Показываем/скрываем скидку
+        if (couponRow && couponDiscountSpan) {
+            if (couponDiscount > 0) {
+                couponRow.style.display = 'flex';
+                couponDiscountSpan.textContent = '-' + formatPrice(couponDiscount);
+            } else {
+                couponRow.style.display = 'none';
+            }
+        }
+    }
+    
+    // Визуальное выделение выбранного способа доставки
+    function highlightSelectedShipping(selectedRadio) {
+        document.querySelectorAll('.shipping-option').forEach(opt => {
+            opt.classList.remove('border-primary', 'bg-light');
+        });
+        
+        const selectedOption = selectedRadio.closest('.shipping-option');
+        if (selectedOption) {
+            selectedOption.classList.add('border-primary', 'bg-light');
+        }
+    }
+    
+    // Расчет цены доставки с учетом бесплатной доставки
+    function calculateShippingPrice(methodId) {
+        const method = shippingMethodsData.find(m => m.id == methodId);
+        if (!method) return 0;
+        
+        if (method.free_from && totalPrice >= method.free_from) {
+            return 0;
+        }
+        return method.price;
+    }
+    
+    // Обновление бейджа цены доставки
+    function updateShippingBadge(methodId, price) {
+        const method = shippingMethodsData.find(m => m.id == methodId);
+        if (!method) return;
+        
+        const badge = document.getElementById('badge-' + methodId);
+        if (!badge) return;
+        
+        const isFree = price === 0 && method.free_from;
+        badge.className = 'badge bg-' + (isFree ? 'success' : 'primary') + ' ms-2 shipping-badge';
+        badge.textContent = isFree 
+            ? 'Бесплатно (от ' + method.free_from.toLocaleString('ru-RU') + ' руб.)'
+            : method.price.toLocaleString('ru-RU') + ' руб.';
+    }
+    
+    // Восстановление выбора доставки из корзины или хранилищ
+    function restoreShippingFromCart() {
+        let restored = false;
+        
+        // Приоритет 0: Сессия PHP (самый надежный - сохранено при выборе в корзине)
+        if (preselectedShippingFromSession) {
+            const radio = document.getElementById('shipping_' + preselectedShippingFromSession);
+            if (radio) {
+                radio.checked = true;
+                shippingPrice = calculateShippingPrice(preselectedShippingFromSession);
+                
+                highlightSelectedShipping(radio);
+                updateTotals();
+                updateShippingBadge(preselectedShippingFromSession, shippingPrice);
+                restored = true;
+                
+                // Синхронизируем во все хранилища
+                localStorage.setItem('selected_shipping_method', preselectedShippingFromSession);
+                localStorage.setItem('selected_shipping_price', shippingPrice);
+                sessionStorage.setItem('cart_shipping_method', preselectedShippingFromSession);
+                sessionStorage.setItem('cart_shipping_price', shippingPrice);
+            }
+        }
+        
+        if (restored) return;
+        
+        // Приоритет 1: sessionStorage из корзины
+        const cartMethod = sessionStorage.getItem('cart_shipping_method');
+        const cartPrice = sessionStorage.getItem('cart_shipping_price');
+        
+        if (cartMethod) {
+            const radio = document.getElementById('shipping_' + cartMethod);
+            if (radio) {
+                radio.checked = true;
+                shippingPrice = calculateShippingPrice(cartMethod);
+                
+                highlightSelectedShipping(radio);
+                updateTotals();
+                updateShippingBadge(cartMethod, shippingPrice);
+                restored = true;
+                
+                // Синхронизируем в localStorage
+                localStorage.setItem('selected_shipping_method', cartMethod);
+                localStorage.setItem('selected_shipping_price', shippingPrice);
+            }
+        }
+        
+        if (restored) return;
+        
+        // Приоритет 2: localStorage
+        const savedMethod = localStorage.getItem('selected_shipping_method');
+        const savedPrice = localStorage.getItem('selected_shipping_price');
+        
+        if (savedMethod) {
+            const radio = document.getElementById('shipping_' + savedMethod);
+            if (radio) {
+                radio.checked = true;
+                shippingPrice = calculateShippingPrice(savedMethod);
+                
+                highlightSelectedShipping(radio);
+                updateTotals();
+                updateShippingBadge(savedMethod, shippingPrice);
+                restored = true;
+                
+                // Синхронизируем обратно в sessionStorage
+                sessionStorage.setItem('cart_shipping_method', savedMethod);
+                sessionStorage.setItem('cart_shipping_price', shippingPrice);
+            }
+        }
+        
+        if (restored) return;
+        
+        // По умолчанию выбираем первый способ (самовывоз)
+        const defaultShipping = document.querySelector('.shipping-radio');
+        if (defaultShipping) {
+            defaultShipping.checked = true;
+            shippingPrice = calculateShippingPrice(defaultShipping.value);
+            highlightSelectedShipping(defaultShipping);
+            updateTotals();
+            updateShippingBadge(defaultShipping.value, shippingPrice);
+            
+            // Сохраняем значения по умолчанию
+            const defaultId = defaultShipping.value;
+            localStorage.setItem('selected_shipping_method', defaultId);
+            localStorage.setItem('selected_shipping_price', shippingPrice);
+            sessionStorage.setItem('cart_shipping_method', defaultId);
+            sessionStorage.setItem('cart_shipping_price', shippingPrice);
         }
     }
     
     // Обработчик изменения способа доставки
     shippingInputs.forEach(input => {
         input.addEventListener('change', function() {
-            const methodId = this.value;
-            const shippingMethods = <?= json_encode($shipping_methods) ?>;
-            const method = shippingMethods.find(m => m.id == methodId);
+            shippingPrice = calculateShippingPrice(this.value);
             
-            if (method) {
-                if (method.free_from && totalPrice >= method.free_from) {
-                    shippingPrice = 0;
-                    shippingPriceSpan.textContent = 'Бесплатно';
-                } else {
-                    shippingPrice = method.price;
-                    shippingPriceSpan.textContent = formatPrice(method.price);
+            highlightSelectedShipping(this);
+            updateTotals();
+            updateShippingBadge(this.value, shippingPrice);
+            
+            // Синхронизируем изменения во все хранилища
+            localStorage.setItem('selected_shipping_method', this.value);
+            localStorage.setItem('selected_shipping_price', shippingPrice);
+            sessionStorage.setItem('cart_shipping_method', this.value);
+            sessionStorage.setItem('cart_shipping_price', shippingPrice);
+        });
+    });
+    
+    // Обработка клика по всему блоку для удобства
+    document.querySelectorAll('.shipping-option').forEach(option => {
+        option.addEventListener('click', function(e) {
+            if (e.target.type !== 'radio' && !e.target.closest('.form-check-input')) {
+                const radio = this.querySelector('.shipping-radio');
+                if (radio && !radio.checked) {
+                    radio.checked = true;
+                    radio.dispatchEvent(new Event('change'));
                 }
-                updateTotals();
             }
         });
     });
     
     // Обработчик применения купона
-    applyCouponBtn.addEventListener('click', function() {
-        const couponCode = couponInput.value.trim();
-        if (!couponCode) return;
-        
-        alert('Проверка купона будет выполнена при отправке формы');
+    if (applyCouponBtn) {
+        applyCouponBtn.addEventListener('click', function() {
+            const couponCode = couponInput.value.trim();
+            if (!couponCode) {
+                const msgEl = document.getElementById('coupon-message');
+                if (msgEl) msgEl.innerHTML = '<span class="text-warning">⚠ Введите код купона</span>';
+                return;
+            }
+            
+            const spinner = document.getElementById('coupon-spinner');
+            const msgEl = document.getElementById('coupon-message');
+            const detailsEl = document.getElementById('coupon-details');
+            
+            if (spinner) spinner.classList.remove('d-none');
+            applyCouponBtn.disabled = true;
+            if (msgEl) msgEl.innerHTML = '';
+            if (detailsEl) detailsEl.classList.add('d-none');
+            
+            // Отправляем AJAX-запрос для проверки купона
+            fetch('/mobileshop/check_coupon.php', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/x-www-form-urlencoded',
+                    'X-Requested-With': 'XMLHttpRequest'
+                },
+                body: 'coupon_code=' + encodeURIComponent(couponCode) + '&total_price=' + totalPrice
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (spinner) spinner.classList.add('d-none');
+                applyCouponBtn.disabled = false;
+                
+                if (data.success) {
+                    // Рассчитываем скидку
+                    let discount = 0;
+                    if (data.coupon.discount_type === 'percent') {
+                        discount = totalPrice * data.coupon.discount_value / 100;
+                        if (data.coupon.max_discount_amount && discount > data.coupon.max_discount_amount) {
+                            discount = data.coupon.max_discount_amount;
+                        }
+                    } else {
+                        discount = Math.min(data.coupon.discount_value, totalPrice);
+                    }
+                    couponDiscount = discount;
+                    
+                    // Показываем информацию о купоне
+                    let discountText = data.coupon.discount_type === 'percent' 
+                        ? data.coupon.discount_value + '%' 
+                        : formatPrice(data.coupon.discount_value);
+                    
+                    let detailsText = 'Купон применен: скидка ' + discountText;
+                    if (data.coupon.max_discount_amount) {
+                        detailsText += ', макс. скидка ' + formatPrice(data.coupon.max_discount_amount);
+                    }
+                    
+                    if (detailsEl) {
+                        detailsEl.innerHTML = '<i class="fas fa-check-circle text-success me-1"></i>' + detailsText;
+                        detailsEl.classList.remove('d-none');
+                    }
+                    if (msgEl) {
+                        msgEl.innerHTML = '<span class="text-success">✓ Купон успешно применен</span>';
+                    }
+                    
+                    // Обновляем итоговую сумму
+                    updateTotals();
+                    
+                    // Добавляем скрытое поле с ID купона для отправки формы
+                    let hiddenInput = document.getElementById('applied_coupon_id');
+                    if (!hiddenInput) {
+                        hiddenInput = document.createElement('input');
+                        hiddenInput.type = 'hidden';
+                        hiddenInput.name = 'applied_coupon_id';
+                        hiddenInput.id = 'applied_coupon_id';
+                        document.getElementById('checkout-form').appendChild(hiddenInput);
+                    }
+                    hiddenInput.value = data.coupon.id;
+                    
+                } else {
+                    couponDiscount = 0;
+                    if (msgEl) {
+                        msgEl.innerHTML = '<span class="text-danger">✗ ' + data.message + '</span>';
+                    }
+                    if (detailsEl) detailsEl.classList.add('d-none');
+                    
+                    // Удаляем скрытое поле, если оно есть
+                    let hiddenInput = document.getElementById('applied_coupon_id');
+                    if (hiddenInput) {
+                        hiddenInput.remove();
+                    }
+                    
+                    updateTotals();
+                }
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                if (spinner) spinner.classList.add('d-none');
+                applyCouponBtn.disabled = false;
+                if (msgEl) {
+                    msgEl.innerHTML = '<span class="text-danger">✗ Ошибка при проверке купона</span>';
+                }
+            });
+        });
+    }
+    
+    // Синхронизация при возврате на страницу (кнопка "назад")
+    window.addEventListener('pageshow', function(event) {
+        if (event.persisted) {
+            restoreShippingFromCart();
+        }
     });
     
-    function formatPrice(price) {
-        return price.toLocaleString('ru-RU') + ' руб.';
-    }
+    // Инициализация при загрузке
+    restoreShippingFromCart();
 });
 </script>
 
@@ -800,6 +1160,51 @@ document.addEventListener('DOMContentLoaded', function() {
 }
 .sticky-top {
     z-index: 100;
+}
+
+/* Стили для способов доставки */
+.shipping-option {
+    padding: 12px;
+    border: 2px solid transparent;
+    border-radius: 8px;
+    transition: all 0.2s ease;
+    cursor: pointer;
+}
+
+.shipping-option:hover {
+    border-color: #dee2e6;
+    background-color: #f8f9fa;
+}
+
+.shipping-option.border-primary {
+    border-color: #0d6efd !important;
+}
+
+.shipping-option.bg-light {
+    background-color: #e9ecef !important;
+}
+
+.shipping-option .form-check-input {
+    margin-top: 0.3rem;
+}
+
+.shipping-price {
+    transition: all 0.3s ease;
+}
+
+.shipping-price.text-success {
+    color: #198754 !important;
+    font-weight: 600;
+}
+
+#final-total {
+    transition: all 0.3s ease;
+}
+
+.seller-group {
+    padding: 10px;
+    background: #f8f9fa;
+    border-radius: 8px;
 }
 </style>
 

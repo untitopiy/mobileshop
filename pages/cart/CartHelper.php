@@ -3,6 +3,9 @@
  * mobileshop/pages/cart/CartHelper.php
  * Класс для работы с корзиной авторизованных пользователей
  */
+
+require_once __DIR__ . '/CartItemDTO.php';
+
 class CartHelper {
     private $db;
     
@@ -10,9 +13,6 @@ class CartHelper {
         $this->db = $db;
     }
     
-    /**
-     * Получить или создать корзину пользователя
-     */
     public function getOrCreateCart($user_id) {
         $cart_query = $this->db->prepare("SELECT id FROM cart WHERE user_id = ?");
         $cart_query->bind_param('i', $user_id);
@@ -29,15 +29,11 @@ class CartHelper {
         return $cart['id'];
     }
     
-    /**
-     * Получить информацию о наличии (ИСПРАВЛЕНО)
-     */
     private function getStockInfo($product_id, $variation_id = null) {
         if ($variation_id) {
             $query = $this->db->prepare("SELECT quantity, price FROM product_variations WHERE id = ? AND product_id = ?");
             $query->bind_param('ii', $variation_id, $product_id);
         } else {
-            // Исправлено: корректный SUM(quantity) и MIN(price)
             $query = $this->db->prepare("
                 SELECT COALESCE(SUM(quantity), 0) as quantity, 
                        COALESCE(MIN(price), 0) as price 
@@ -51,9 +47,6 @@ class CartHelper {
         return $query->get_result()->fetch_assoc();
     }
     
-    /**
-     * Найти существующий товар в корзине
-     */
     public function getExistingItem($cart_id, $product_id, $variation_id) {
         $query = $this->db->prepare("
             SELECT id, quantity FROM cart_items 
@@ -65,18 +58,12 @@ class CartHelper {
         return $query->get_result()->fetch_assoc();
     }
     
-    /**
-     * Обновить количество товара в корзине
-     */
     public function updateItemQuantity($item_id, $quantity) {
         $update = $this->db->prepare("UPDATE cart_items SET quantity = ? WHERE id = ?");
         $update->bind_param('ii', $quantity, $item_id);
         return $update->execute();
     }
     
-    /**
-     * Добавить новый товар в корзину
-     */
     public function insertItem($cart_id, $product_id, $variation_id, $quantity, $price) {
         $insert = $this->db->prepare("
             INSERT INTO cart_items (cart_id, product_id, variation_id, quantity, price, created_at)
@@ -86,11 +73,7 @@ class CartHelper {
         return $insert->execute();
     }
     
-    /**
-     * Добавить товар в корзину (с транзакцией)
-     */
     public function addItem($user_id, $product_id, $quantity, $variation_id = null) {
-        // Проверяем наличие на складе
         $stock_info = $this->getStockInfo($product_id, $variation_id);
         
         if (!$stock_info || $stock_info['quantity'] <= 0 || $quantity > $stock_info['quantity']) {
@@ -100,7 +83,6 @@ class CartHelper {
         $cart_id = $this->getOrCreateCart($user_id);
         $price = $stock_info['price'];
         
-        // Проверяем существующий товар
         $existing = $this->getExistingItem($cart_id, $product_id, $variation_id);
         
         $this->db->begin_transaction();
@@ -125,9 +107,6 @@ class CartHelper {
         return ['success' => true, 'message' => 'Товар добавлен в корзину'];
     }
     
-    /**
-     * Получить количество товаров в корзине
-     */
     public function getCartCount($user_id) {
         $stmt = $this->db->prepare("
             SELECT COALESCE(SUM(ci.quantity), 0) as count 
@@ -144,129 +123,123 @@ class CartHelper {
         return $count;
     }
     
-    /**
-     * Получить полные данные корзины
-     */
     public function getCartItems($user_id) {
-    $query = $this->db->prepare("
-        SELECT 
-            ci.id as cart_item_id,
-            ci.product_id,
-            ci.variation_id,
-            ci.quantity,
-            ci.price as cart_price,
-            p.id,
-            p.name,
-            p.brand,
-            p.model,
-            p.type,
-            p.category_id,
-            COALESCE(pv.price, ci.price) as current_price,
-            pv.old_price,
-            COALESCE(pv.quantity, 
-                (SELECT COALESCE(SUM(quantity), 0) FROM product_variations WHERE product_id = p.id)
-            ) as stock,
-            pv.sku,
-            (SELECT image_url FROM product_images 
-             WHERE product_id = p.id 
-             AND (variation_id = ci.variation_id OR (variation_id IS NULL AND ci.variation_id IS NULL))
-             ORDER BY is_primary DESC, sort_order ASC 
-             LIMIT 1) as image_url,
-            s.shop_name as seller_name,
-            s.id as seller_id,
-            prom.discount_percent,
-            prom.discount_type,
-            prom.discount_value,
-            prom.name as promotion_name
-        FROM cart c
-        JOIN cart_items ci ON ci.cart_id = c.id
-        JOIN products p ON p.id = ci.product_id
-        LEFT JOIN product_variations pv ON pv.id = ci.variation_id
-        LEFT JOIN sellers s ON s.id = p.seller_id
-        LEFT JOIN (
+        $query = $this->db->prepare("
             SELECT 
-                pp.product_id,
+                ci.id as cart_item_id,
+                ci.product_id,
+                ci.variation_id,
+                ci.quantity,
+                ci.price as cart_price,
+                p.id,
+                p.name,
+                p.brand,
+                p.model,
+                p.type,
+                p.category_id,
+                COALESCE(pv.price, ci.price) as current_price,
+                pv.old_price,
+                COALESCE(pv.quantity, 
+                    (SELECT COALESCE(SUM(quantity), 0) FROM product_variations WHERE product_id = p.id)
+                ) as stock,
+                pv.sku,
+                (SELECT image_url FROM product_images 
+                 WHERE product_id = p.id 
+                 AND (variation_id = ci.variation_id OR (variation_id IS NULL AND ci.variation_id IS NULL))
+                 ORDER BY is_primary DESC, sort_order ASC 
+                 LIMIT 1) as image_url,
+                s.shop_name as seller_name,
+                s.id as seller_id,
+                prom.discount_percent,
                 prom.discount_type,
                 prom.discount_value,
-                prom.name,
-                CASE 
-                    WHEN prom.discount_type = 'percent' THEN prom.discount_value
-                    ELSE NULL
-                END as discount_percent
-            FROM promotion_products pp
-            JOIN promotions prom ON prom.id = pp.promotion_id 
-            WHERE prom.is_active = 1 
-              AND prom.starts_at <= NOW() 
-              AND (prom.expires_at >= NOW() OR prom.expires_at IS NULL)
-        ) prom ON prom.product_id = p.id
-        WHERE c.user_id = ?
-        ORDER BY ci.created_at DESC
-    ");
-    
-    $query->bind_param('i', $user_id);
-    $query->execute();
-    $result = $query->get_result();
-    
-    $items = [];
-    $total_price = 0;
-    $smartphones = [];
-    
-    while ($row = $result->fetch_assoc()) {
-        $item_price = (float)$row['current_price'];
-        $original_price = $row['old_price'] ? (float)$row['old_price'] : $item_price;
+                prom.name as promotion_name
+            FROM cart c
+            JOIN cart_items ci ON ci.cart_id = c.id
+            JOIN products p ON p.id = ci.product_id
+            LEFT JOIN product_variations pv ON pv.id = ci.variation_id
+            LEFT JOIN sellers s ON s.id = p.seller_id
+            LEFT JOIN (
+                SELECT 
+                    pp.product_id,
+                    prom.discount_type,
+                    prom.discount_value,
+                    prom.name,
+                    CASE 
+                        WHEN prom.discount_type = 'percent' THEN prom.discount_value
+                        ELSE NULL
+                    END as discount_percent
+                FROM promotion_products pp
+                JOIN promotions prom ON prom.id = pp.promotion_id 
+                WHERE prom.is_active = 1 
+                  AND prom.starts_at <= NOW() 
+                  AND (prom.expires_at >= NOW() OR prom.expires_at IS NULL)
+            ) prom ON prom.product_id = p.id
+            WHERE c.user_id = ?
+            ORDER BY ci.created_at DESC
+        ");
         
-        // Расчет скидки
-        if ($row['discount_percent']) {
-            $final_price = $item_price * (100 - $row['discount_percent']) / 100;
-        } elseif ($row['discount_type'] === 'fixed' && $row['discount_value'] > 0) {
-            $final_price = max(0, $item_price - $row['discount_value']);
-        } else {
-            $final_price = $item_price;
+        $query->bind_param('i', $user_id);
+        $query->execute();
+        $result = $query->get_result();
+        
+        $items = [];
+        $total_price = 0;
+        $smartphones = [];
+        
+        while ($row = $result->fetch_assoc()) {
+            $item_price = (float)$row['current_price'];
+            $original_price = $row['old_price'] ? (float)$row['old_price'] : $item_price;
+            
+            // Расчет скидки
+            if ($row['discount_percent']) {
+                $final_price = $item_price * (100 - $row['discount_percent']) / 100;
+            } elseif ($row['discount_type'] === 'fixed' && $row['discount_value'] > 0) {
+                $final_price = max(0, $item_price - $row['discount_value']);
+            } else {
+                $final_price = $item_price;
+            }
+            
+            // Формируем массив напрямую, без DTO
+            $items[] = [
+                'cart_key' => $row['variation_id'] 
+                    ? "{$row['product_id']}_{$row['variation_id']}" 
+                    : (string)$row['product_id'],
+                'product_id' => (int)$row['product_id'],
+                'variation_id' => $row['variation_id'] ? (int)$row['variation_id'] : null,
+                'quantity' => (int)$row['quantity'],
+                'stock' => (int)$row['stock'],
+                'name' => $row['name'] ?? '',
+                'brand' => $row['brand'] ?? '',
+                'model' => $row['model'] ?? null,
+                'sku' => $row['sku'] ?? null,
+                'current_price' => $final_price,
+                'original_price' => $original_price,
+                'subtotal' => $final_price * $row['quantity'],
+                'image_url' => $row['image_url'] ?? null,
+                'seller_name' => $row['seller_name'] ?? null,
+                'seller_id' => $row['seller_id'] ? (int)$row['seller_id'] : null,
+                'discount_percent' => isset($row['discount_percent']) ? (float)$row['discount_percent'] : null,
+                'promotion_name' => $row['promotion_name'] ?? null,
+                'type' => $row['type'] ?? 'simple',
+                'category_id' => (int)($row['category_id'] ?? 0)
+            ];
+            
+            $total_price += $final_price * $row['quantity'];
+            
+            if (($row['type'] ?? 'simple') === 'simple' && ($row['category_id'] ?? 0) == 1) {
+                $smartphones[] = $row['product_id'];
+            }
         }
         
-        // Сохраняем все данные в массив
-        $items[] = [
-            'cart_key' => $row['variation_id'] 
-                ? "{$row['product_id']}_{$row['variation_id']}" 
-                : (string)$row['product_id'],
-            'product_id' => (int)$row['product_id'],
-            'variation_id' => $row['variation_id'] ? (int)$row['variation_id'] : null,
-            'quantity' => (int)$row['quantity'],
-            'stock' => (int)$row['stock'],
-            'name' => $row['name'] ?? '',
-            'brand' => $row['brand'] ?? '',
-            'model' => $row['model'] ?? null,
-            'sku' => $row['sku'] ?? null,
-            'current_price' => $final_price,
-            'original_price' => $original_price,
-            'subtotal' => $final_price * $row['quantity'],
-            'image_url' => $row['image_url'] ?? null,
-            'seller_name' => $row['seller_name'] ?? null,
-            'seller_id' => $row['seller_id'] ? (int)$row['seller_id'] : null,
-            'discount_percent' => isset($row['discount_percent']) ? (float)$row['discount_percent'] : null,
-            'promotion_name' => $row['promotion_name'] ?? null,
-            'type' => $row['type'] ?? 'simple',
-            'category_id' => (int)($row['category_id'] ?? 0)
+        return [
+            'items' => $items,
+            'total_price' => $total_price,
+            'smartphones' => array_unique($smartphones),
+            'count' => count($items)
         ];
-        
-        $total_price += $final_price * $row['quantity'];
-        
-        if (($row['type'] ?? 'simple') === 'simple' && ($row['category_id'] ?? 0) == 1) {
-            $smartphones[] = $row['product_id'];
-        }
     }
     
-    return [
-        'items' => $items,
-        'total_price' => $total_price,
-        'smartphones' => array_unique($smartphones),
-        'count' => count($items)
-    ];
-}
-    
-    /**
-     * Удалить товар из корзины
-     */
     public function removeItem($user_id, $product_id, $variation_id = null) {
         if ($variation_id) {
             $query = $this->db->prepare("
@@ -287,11 +260,7 @@ class CartHelper {
         return $query->execute();
     }
     
-    /**
-     * Обновить количество с проверкой stock
-     */
     public function updateQuantity($user_id, $product_id, $variation_id, $new_quantity) {
-        // Проверяем stock
         $stock_info = $this->getStockInfo($product_id, $variation_id);
         $stock = $stock_info['quantity'] ?? 0;
         
@@ -299,7 +268,6 @@ class CartHelper {
             return $this->removeItem($user_id, $product_id, $variation_id);
         }
         
-        // Обновляем количество
         if ($variation_id) {
             $update = $this->db->prepare("
                 UPDATE cart_items ci
@@ -321,9 +289,6 @@ class CartHelper {
         return $update->execute();
     }
     
-    /**
-     * Слияние корзины гостя с БД
-     */
     public function mergeGuestCart($user_id, $session_cart) {
         if (empty($session_cart)) {
             return ['merged' => 0, 'added' => 0];

@@ -6,6 +6,7 @@
 /* Контейнер корзины */
 .cart-container {
     max-width: 1200px;
+    margin: 0 auto;
 }
 
 /* Изображение товара */
@@ -51,6 +52,45 @@
 
 .item-price {
     font-size: 1.1rem;
+}
+
+/* Стили для способов доставки */
+.shipping-option {
+    padding: 12px;
+    border: 2px solid transparent;
+    border-radius: 8px;
+    transition: all 0.2s ease;
+    cursor: pointer;
+}
+
+.shipping-option:hover {
+    border-color: #dee2e6;
+    background-color: #f8f9fa;
+}
+
+.shipping-option.border-primary {
+    border-color: #0d6efd !important;
+}
+
+.shipping-option.bg-light {
+    background-color: #e9ecef !important;
+}
+
+.shipping-option .form-check-input {
+    margin-top: 0.3rem;
+}
+
+.shipping-price {
+    transition: all 0.3s ease;
+}
+
+.shipping-price.text-success {
+    color: #198754 !important;
+    font-weight: 600;
+}
+
+#final-total {
+    transition: all 0.3s ease;
 }
 
 /* Адаптивность */

@@ -2,7 +2,6 @@
 /**
  * mobileshop/pages/cart/GuestCartService.php
  * Сервис для работы с гостевой корзиной (сессия)
- * УЛУЧШЕННАЯ ВЕРСИЯ: разделение SQL-запросов для корректной обработки NULL
  */
 
 require_once __DIR__ . '/CartItemDTO.php';
@@ -127,7 +126,8 @@ class GuestCartService {
             }
             
             $dto = CartItemDTO::fromGuestData($itemData, $cartKey, $actualQty);
-            $items[] = $dto;
+            // ВАЖНО: Преобразуем DTO в массив
+            $items[] = $dto->toArray();
             $totalPrice += $dto->subtotal;
             
             if ($dto->type === 'simple' && $dto->categoryId == 1) {
@@ -193,17 +193,7 @@ class GuestCartService {
         return $result;
     }
     
-    /**
-     * УЛУЧШЕННАЯ ВЕРСИЯ: Разделение SQL-запросов для корректной обработки NULL
-     * 
-     * Преимущества:
-     * 1. Чище SQL без условных выражений с NULL
-     * 2. Лучше производительность (индексы используются эффективнее)
-     * 3. Нет проблем с передачей NULL в mysqli bind_param
-     * 4. Проще отлаживать и поддерживать
-     */
     private function getItemDetails(int $productId, ?int $variationId = null): ?array {
-        // Разные SQL-запросы для случаев с variationId и без
         if ($variationId) {
             return $this->getItemDetailsWithVariation($productId, $variationId);
         } else {
@@ -211,9 +201,6 @@ class GuestCartService {
         }
     }
     
-    /**
-     * Получение деталей товара с конкретной вариацией
-     */
     private function getItemDetailsWithVariation(int $productId, int $variationId): ?array {
         $sql = "
             SELECT 
@@ -271,9 +258,6 @@ class GuestCartService {
         return $result ? $this->processItemData($result) : null;
     }
     
-    /**
-     * Получение деталей товара без вариации (берём минимальную цену из всех вариаций)
-     */
     private function getItemDetailsWithoutVariation(int $productId): ?array {
         $sql = "
             SELECT 
@@ -336,9 +320,6 @@ class GuestCartService {
         return $result ? $this->processItemData($result) : null;
     }
     
-    /**
-     * Обработка полученных данных товара (применение скидок)
-     */
     private function processItemData(array $result): array {
         $itemPrice = (float)$result['current_price'];
         $originalPrice = isset($result['original_price']) ? (float)$result['original_price'] : $itemPrice;

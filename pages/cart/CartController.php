@@ -23,7 +23,7 @@ class CartController {
         }
     }
     
-     public function handleRequest(): void {
+    public function handleRequest(): void {
         // AJAX-запросы обрабатываем отдельно
         if ($this->isAjaxRequest()) {
             $this->handleAjaxRequest();
@@ -56,12 +56,36 @@ class CartController {
             case 'update':
                 $this->handleAjaxUpdate();
                 break;
+            case 'save_shipping':
+                $this->handleAjaxSaveShipping();
+                break;
             case 'add':
-                // Добавление обрабатывается через Api_Cart.php, но оставим для совместимости
                 $this->handleAddFromForm();
                 break;
             default:
                 $this->jsonResponse(['success' => false, 'message' => 'Unknown action']);
+        }
+    }
+    
+    /**
+     * AJAX-сохранение выбранного способа доставки
+     */
+    private function handleAjaxSaveShipping(): void {
+        $shipping_method = (int)($_POST['shipping_method'] ?? 0);
+        $shipping_price = (float)($_POST['shipping_price'] ?? 0);
+        
+        if ($shipping_method > 0) {
+            $_SESSION['selected_shipping_method'] = $shipping_method;
+            $_SESSION['selected_shipping_price'] = $shipping_price;
+            
+            $this->jsonResponse([
+                'success' => true,
+                'message' => 'Способ доставки сохранен',
+                'method' => $shipping_method,
+                'price' => $shipping_price
+            ]);
+        } else {
+            $this->jsonResponse(['success' => false, 'message' => 'Некорректный способ доставки']);
         }
     }
     
@@ -149,6 +173,12 @@ class CartController {
             $_SESSION['error'] = "Недействительный CSRF-токен";
             header("Location: cart.php");
             exit;
+        }
+        
+        // Сохраняем выбранный способ доставки в сессию
+        if (isset($_POST['shipping_method'])) {
+            $_SESSION['selected_shipping_method'] = (int)$_POST['shipping_method'];
+            $_SESSION['selected_shipping_price'] = (float)($_POST['shipping_price'] ?? 0);
         }
         
         if (isset($_POST['product_id'], $_POST['quantity'])) {
@@ -248,6 +278,10 @@ class CartController {
         
         $shippingMethods = $this->getShippingMethods();
         
+        // Передаем сохраненный способ доставки в шаблон
+        $preselectedShipping = $_SESSION['selected_shipping_method'] ?? null;
+        $preselectedShippingPrice = $_SESSION['selected_shipping_price'] ?? null;
+        
         require_once __DIR__ . '/cart_view.php';
     }
     
@@ -259,21 +293,62 @@ class CartController {
         return [(int)$cartKey, null];
     }
     
-    private function getShippingMethods(): array {
-        $methods = [];
-        $result = $this->db->query("
-            SELECT * FROM shipping_methods 
-            WHERE is_active = 1 
-            ORDER BY sort_order ASC
-        ");
-        
-        if ($result) {
-            while ($row = $result->fetch_assoc()) {
-                $methods[] = $row;
-            }
-        }
-        
-        return $methods;
+    /**
+     * ИСПРАВЛЕНО: Унифицированные способы доставки (те же что и в checkout.php)
+     */
+    public function getShippingMethods(): array {
+        return [
+            [
+                'id' => 1,
+                'name' => 'Самовывоз из магазина',
+                'code' => 'pickup',
+                'price' => 0.00,
+                'free_from' => null,
+                'estimated_days_min' => 1,
+                'estimated_days_max' => 1,
+                'description' => 'Заберите заказ в нашем магазине'
+            ],
+            [
+                'id' => 2,
+                'name' => 'Курьер по Минску',
+                'code' => 'courier_minsk',
+                'price' => 10.00,
+                'free_from' => 500.00,
+                'estimated_days_min' => 1,
+                'estimated_days_max' => 2,
+                'description' => 'Доставка курьером по Минску'
+            ],
+            [
+                'id' => 3,
+                'name' => 'Белпочта',
+                'code' => 'belpost',
+                'price' => 15.00,
+                'free_from' => null,
+                'estimated_days_min' => 3,
+                'estimated_days_max' => 7,
+                'description' => 'Доставка в отделение Белпочты'
+            ],
+            [
+                'id' => 4,
+                'name' => 'Европочта',
+                'code' => 'europost',
+                'price' => 12.00,
+                'free_from' => 300.00,
+                'estimated_days_min' => 2,
+                'estimated_days_max' => 4,
+                'description' => 'Доставка в отделение Европочты'
+            ],
+            [
+                'id' => 5,
+                'name' => 'DHL Express',
+                'code' => 'dhl',
+                'price' => 50.00,
+                'free_from' => null,
+                'estimated_days_min' => 1,
+                'estimated_days_max' => 3,
+                'description' => 'Экспресс-доставка по всему миру'
+            ]
+        ];
     }
     
     public function mergeGuestCartOnLogin(int $userId): array {

@@ -25,12 +25,17 @@ else if (isset($_SESSION['compare_ids']) && !empty($_SESSION['compare_ids'])) {
 }
 // 3. Если пользователь авторизован, загружаем из базы
 else if (isset($_SESSION['id'])) {
-    $user_id = $_SESSION['id'];
-    $result = $db->query("SELECT product_id FROM `compare` WHERE user_id = $user_id ORDER BY created_at DESC");
+    $user_id = (int)$_SESSION['id'];
+    // ИСПРАВЛЕНО: Используем prepared statement для защиты от SQL-инъекции
+    $stmt = $db->prepare("SELECT product_id FROM `compare` WHERE user_id = ? ORDER BY created_at DESC");
+    $stmt->bind_param('i', $user_id);
+    $stmt->execute();
+    $result = $stmt->get_result();
     while ($row = $result->fetch_assoc()) {
         $compare_ids[] = $row['product_id'];
     }
     $_SESSION['compare_ids'] = $compare_ids;
+    $stmt->close();
 }
 
 // Ограничиваем 4 товарами
@@ -86,6 +91,8 @@ $query->bind_param($types, ...$compare_ids);
 $query->execute();
 $result = $query->get_result();
 
+// Оптимизация: Получаем все атрибуты одним запросом вместо N+1
+$product_ids_for_attrs = [];
 while ($row = $result->fetch_assoc()) {
     // Исправляем путь к изображению
     $image_path = $row['image_url'];
@@ -100,17 +107,33 @@ while ($row = $result->fetch_assoc()) {
     }
     $row['image_url'] = $image_path;
     $products[$row['id']] = $row;
+    $product_ids_for_attrs[] = $row['id'];
+}
+$query->close();
+
+// Оптимизированный запрос атрибутов для всех товаров сразу
+if (!empty($product_ids_for_attrs)) {
+    $attr_placeholders = implode(',', array_fill(0, count($product_ids_for_attrs), '?'));
+    $attr_types = str_repeat('i', count($product_ids_for_attrs));
     
-    // Получаем атрибуты
     $attr_query = $db->prepare("
-        SELECT a.id, a.name, a.slug, a.type, a.unit,
-               pa.value_text, pa.value_number, pa.value_boolean
+        SELECT 
+            pa.product_id,
+            a.id, 
+            a.name, 
+            a.slug, 
+            a.type, 
+            a.unit,
+            pa.value_text, 
+            pa.value_number, 
+            pa.value_boolean
         FROM product_attributes pa
         JOIN attributes a ON a.id = pa.attribute_id
-        WHERE pa.product_id = ? AND a.is_visible_on_product = 1
+        WHERE pa.product_id IN ($attr_placeholders) AND a.is_visible_on_product = 1
         ORDER BY a.sort_order
     ");
-    $attr_query->bind_param('i', $row['id']);
+    
+    $attr_query->bind_param($attr_types, ...$product_ids_for_attrs);
     $attr_query->execute();
     $attr_result = $attr_query->get_result();
     
@@ -124,7 +147,7 @@ while ($row = $result->fetch_assoc()) {
             $value = $attr['value_boolean'] ? 'Да' : 'Нет';
         }
         
-        $products[$row['id']]['attributes'][$attr['slug']] = [
+        $products[$attr['product_id']]['attributes'][$attr['slug']] = [
             'name' => $attr['name'],
             'value' => $value,
             'unit' => $attr['unit']
@@ -147,9 +170,6 @@ while ($row = $result->fetch_assoc()) {
                 <a href="../index.php" class="btn btn-outline-primary">
                     <i class="fas fa-arrow-left"></i> Назад в каталог
                 </a>
-                <button onclick="window.print()" class="btn btn-outline-secondary">
-                    <i class="fas fa-print"></i> Печать
-                </button>
                 <button class="btn btn-outline-danger" id="clear-compare-btn" onclick="clearAllCompare()">
                     <i class="fas fa-trash"></i> Очистить сравнение
                 </button>
@@ -175,7 +195,8 @@ while ($row = $result->fetch_assoc()) {
                                 <button class="btn btn-sm btn-outline-danger position-absolute top-0 end-0 remove-from-compare"
                                         data-product-id="<?= $product['id'] ?>"
                                         onclick="removeFromCompare(<?= $product['id'] ?>)"
-                                        title="Удалить из сравнения">
+                                        title="Удалить из сравнения"
+                                        aria-label="Удалить <?= htmlspecialchars($product['name']) ?> из сравнения">
                                     <i class="fas fa-times"></i>
                                 </button>
                             </div>
@@ -219,7 +240,7 @@ while ($row = $result->fetch_assoc()) {
                     <td class="fw-bold">Рейтинг</td>
                     <?php foreach ($products as $product): ?>
                         <td class="text-center">
-                            <div class="rating-stars">
+                            <div class="rating-stars" role="img" aria-label="Рейтинг <?= number_format($product['rating'], 1) ?> из 5">
                                 <?php for($i = 1; $i <= 5; $i++): ?>
                                     <i class="fas fa-star<?= $i <= round($product['rating']) ? '' : '-o' ?> text-warning"></i>
                                 <?php endfor; ?>
@@ -272,10 +293,12 @@ while ($row = $result->fetch_assoc()) {
                     <?php foreach ($products as $product): ?>
                         <td class="text-center">
                             <?php if ($product['total_stock'] > 0): ?>
-                                <form method="POST" action="../pages/cart.php" class="d-inline">
+                                <!-- ИСПРАВЛЕНО: Путь к cart.php изменён с ../pages/cart.php на ../pages/cart/cart.php -->
+                                <form method="POST" action="../pages/cart/cart.php" class="d-inline">
                                     <input type="hidden" name="product_id" value="<?= $product['id'] ?>">
                                     <input type="number" name="quantity" value="1" min="1" max="<?= $product['total_stock'] ?>" 
-                                           class="form-control form-control-sm d-inline-block w-auto me-1" style="width: 60px;">
+                                           class="form-control form-control-sm d-inline-block w-auto me-1" style="width: 60px;"
+                                           aria-label="Количество">
                                     <button type="submit" class="btn btn-sm btn-primary">
                                         <i class="fas fa-shopping-cart"></i> В корзину
                                     </button>

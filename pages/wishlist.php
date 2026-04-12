@@ -267,7 +267,8 @@ $total_items = count($wishlist_items);
                             </p>
                             
                             <div class="d-flex gap-2 mt-2">
-                                <form method="POST" action="cart.php" class="flex-grow-1" onclick="event.stopPropagation();">
+                                <!-- ИСПРАВЛЕНО: путь к корзине изменен на cart/cart.php -->
+                                <form method="POST" action="cart/cart.php" class="flex-grow-1" onclick="event.stopPropagation();">
                                     <input type="hidden" name="product_id" value="<?= $item['id'] ?>">
                                     <input type="hidden" name="quantity" value="1">
                                     <button type="submit" class="btn btn-sm btn-primary w-100" 
