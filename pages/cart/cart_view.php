@@ -4,6 +4,11 @@
  * View-шаблон для отображения корзины
  */
 
+// ===== ИСПРАВЛЕНИЕ: Генерируем CSRF-токен ДО подключения header.php =====
+if (empty($_SESSION['csrf_token'])) {
+    $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
+}
+
 require_once $_SERVER['DOCUMENT_ROOT'] . '/mobileshop/inc/header.php';
 
 $items = $cartData['items'] ?? [];
@@ -28,7 +33,16 @@ $items = $normalizedItems;
 // Определяем выбранный способ доставки
 $selectedShippingId = $preselectedShipping ?? 1;
 $selectedShippingPrice = $preselectedShippingPrice ?? 0;
+
+// ===== ИСПРАВЛЕНИЕ: Получаем актуальное количество товаров в сравнении =====
+$compareCount = 0;
+if (isset($_SESSION['compare_ids']) && is_array($_SESSION['compare_ids'])) {
+    $compareCount = count($_SESSION['compare_ids']);
+}
 ?>
+
+<!-- ===== ИСПРАВЛЕНИЕ: Добавляем CSRF-токен в meta-тег для AJAX ===== -->
+<meta name="csrf-token" content="<?= htmlspecialchars($_SESSION['csrf_token']) ?>">
 
 <div class="container cart-container py-4">
     <h1 class="mb-4">
@@ -63,7 +77,7 @@ $selectedShippingPrice = $preselectedShippingPrice ?? 0;
         </div>
     <?php else: ?>
         <form method="POST" id="cart-form" action="cart.php">
-            <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($_SESSION['csrf_token'] ?? '') ?>">
+            <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($_SESSION['csrf_token']) ?>">
             <input type="hidden" name="shipping_method" id="selected-shipping-method" value="<?= $selectedShippingId ?>">
             <input type="hidden" name="shipping_price" id="selected-shipping-price" value="<?= $selectedShippingPrice ?>">
 

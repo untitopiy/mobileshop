@@ -91,6 +91,11 @@ if (!isset($_SESSION['id'])) {
 
 require_once __DIR__ . '/../inc/header.php';
 
+// Генерируем CSRF токен если его нет
+if (empty($_SESSION['csrf_token'])) {
+    $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
+}
+
 $user_id = $_SESSION['id'];
 
 // Получаем товары из избранного
@@ -267,15 +272,13 @@ $total_items = count($wishlist_items);
                             </p>
                             
                             <div class="d-flex gap-2 mt-2">
-                                <!-- ИСПРАВЛЕНО: путь к корзине изменен на cart/cart.php -->
-                                <form method="POST" action="cart/cart.php" class="flex-grow-1" onclick="event.stopPropagation();">
-                                    <input type="hidden" name="product_id" value="<?= $item['id'] ?>">
-                                    <input type="hidden" name="quantity" value="1">
-                                    <button type="submit" class="btn btn-sm btn-primary w-100" 
-                                            <?= $item['total_stock'] <= 0 ? 'disabled' : '' ?>>
-                                        <i class="fas fa-shopping-cart me-1"></i> В корзину
-                                    </button>
-                                </form>
+                                <!-- ИСПРАВЛЕНО: Используем AJAX вместо обычной формы для добавления в корзину -->
+                                <button type="button" class="btn btn-sm btn-primary w-100 add-to-cart-btn" 
+                                        data-product-id="<?= $item['id'] ?>"
+                                        onclick="event.stopPropagation(); addToCartFromWishlist(<?= $item['id'] ?>)"
+                                        <?= $item['total_stock'] <= 0 ? 'disabled' : '' ?>>
+                                    <i class="fas fa-shopping-cart me-1"></i> В корзину
+                                </button>
                             </div>
                         </div>
                         
@@ -333,5 +336,141 @@ $total_items = count($wishlist_items);
     transform: scale(1.05);
 }
 </style>
+
+<script>
+// Функция добавления в корзину через AJAX (как в product.php)
+function addToCartFromWishlist(productId) {
+    const apiUrl = window.BASE_URL + 'pages/cart/Api_Cart.php';
+    
+    const params = new URLSearchParams();
+    params.append('action', 'add');
+    params.append('product_id', productId);
+    params.append('quantity', 1);
+    
+    // Получаем CSRF токен из meta тега
+    const csrfToken = document.querySelector('meta[name="csrf-token"]');
+    
+    fetch(apiUrl, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/x-www-form-urlencoded',
+            'X-CSRF-TOKEN': csrfToken ? csrfToken.content : ''
+        },
+        body: params.toString()
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            // ИСПРАВЛЕНО: Вызываем updateCartCount() для обновления счетчика в меню
+            updateCartCount();
+            showToast(data.message || 'Товар добавлен в корзину', 'success');
+        } else {
+            showToast(data.message || 'Ошибка при добавлении', 'error');
+        }
+    })
+    .catch(error => {
+        console.error('Error:', error);
+        showToast('Ошибка соединения', 'error');
+    });
+}
+
+// ИСПРАВЛЕНО: Функция обновления счетчика корзины (как в product.php)
+function updateCartCount() {
+    fetch(window.BASE_URL + 'pages/cart/Api_Cart.php?action=count', {
+        headers: {
+            'X-Requested-With': 'XMLHttpRequest'
+        }
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success && data.count !== undefined) {
+            const cartCount = document.getElementById('cart-count');
+            if (cartCount) {
+                cartCount.textContent = data.count;
+            }
+        }
+    })
+    .catch(err => console.error('Error updating cart count:', err));
+}
+
+// Функция показа уведомлений
+function showToast(message, type = 'success') {
+    let toastContainer = document.getElementById('toast-container');
+    if (!toastContainer) {
+        toastContainer = document.createElement('div');
+        toastContainer.id = 'toast-container';
+        toastContainer.style.cssText = 'position: fixed; bottom: 20px; right: 20px; z-index: 9999;';
+        document.body.appendChild(toastContainer);
+    }
+    
+    const toast = document.createElement('div');
+    const colors = { success: '#28a745', error: '#dc3545', warning: '#ffc107', info: '#17a2b8' };
+    toast.style.cssText = `
+        background-color: ${colors[type] || colors.success};
+        color: ${type === 'warning' ? '#333' : 'white'};
+        padding: 12px 20px;
+        border-radius: 8px;
+        margin-bottom: 10px;
+        box-shadow: 0 2px 10px rgba(0,0,0,0.2);
+        animation: slideIn 0.3s ease;
+        cursor: pointer;
+    `;
+    toast.innerHTML = `<div style="display: flex; align-items: center; gap: 10px;">
+        <i class="fas ${type === 'success' ? 'fa-check-circle' : 'fa-exclamation-circle'}"></i>
+        <span>${message}</span>
+    </div>`;
+    
+    toast.addEventListener('click', () => toast.remove());
+    toastContainer.appendChild(toast);
+    setTimeout(() => toast.remove(), 3000);
+}
+
+// Функция удаления из избранного
+function removeFromWishlist(productId) {
+    if (!confirm('Удалить товар из избранного?')) return;
+    
+    const formData = new URLSearchParams();
+    formData.append('ajax_add_wishlist', '1');
+    formData.append('product_id', productId);
+    
+    fetch('?ajax_add_wishlist=1', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/x-www-form-urlencoded',
+            'X-Requested-With': 'XMLHttpRequest'
+        },
+        body: formData.toString()
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            location.reload();
+        } else {
+            showToast(data.message || 'Ошибка', 'error');
+        }
+    })
+    .catch(error => {
+        console.error('Error:', error);
+        showToast('Ошибка соединения', 'error');
+    });
+}
+
+// Функция очистки избранного
+function clearAllWishlist() {
+    if (!confirm('Очистить всё избранное?')) return;
+    
+    fetch('?clear_all=1', {
+        method: 'POST',
+        headers: {
+            'X-Requested-With': 'XMLHttpRequest'
+        }
+    })
+    .then(() => location.reload())
+    .catch(error => {
+        console.error('Error:', error);
+        showToast('Ошибка соединения', 'error');
+    });
+}
+</script>
 
 <?php require_once __DIR__ . '/../inc/footer.php'; ?>

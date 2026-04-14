@@ -288,17 +288,16 @@ if (!empty($product_ids_for_attrs)) {
                     <?php foreach ($products as $product): ?>
                         <td class="text-center product-col" data-product-id="<?= $product['id'] ?>">
                             <?php if ($product['total_stock'] > 0): ?>
-                                <!-- ИСПРАВЛЕНО: Добавлен CSRF-токен и исправлен путь -->
-                                <form method="POST" action="/mobileshop/pages/cart/cart.php" class="d-inline add-to-cart-form">
-                                    <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($_SESSION['csrf_token'] ?? '') ?>">
-                                    <input type="hidden" name="product_id" value="<?= $product['id'] ?>">
-                                    <input type="number" name="quantity" value="1" min="1" max="<?= $product['total_stock'] ?>" 
-                                           class="form-control form-control-sm d-inline-block w-auto me-1" style="width: 60px;"
+                                <!-- ИСПРАВЛЕНО: Используем кнопку с AJAX вместо формы -->
+                                <div class="d-inline-flex align-items-center gap-2">
+                                    <input type="number" id="qty-<?= $product['id'] ?>" value="1" min="1" max="<?= $product['total_stock'] ?>" 
+                                           class="form-control form-control-sm" style="width: 60px;"
                                            aria-label="Количество">
-                                    <button type="submit" class="btn btn-sm btn-primary">
+                                    <button type="button" class="btn btn-sm btn-primary add-to-cart-btn"
+                                            onclick="addToCartFromCompare(<?= $product['id'] ?>)">
                                         <i class="fas fa-shopping-cart"></i> В корзину
                                     </button>
-                                </form>
+                                </div>
                             <?php else: ?>
                                 <span class="text-muted">Нет в наличии</span>
                             <?php endif; ?>
@@ -366,6 +365,67 @@ if (!empty($product_ids_for_attrs)) {
 
 <!-- JavaScript для страницы сравнения -->
 <script>
+/**
+ * Добавляет товар в корзину через AJAX (как в product.php)
+ * @param {number} productId - ID товара
+ */
+function addToCartFromCompare(productId) {
+    const qtyInput = document.getElementById('qty-' + productId);
+    const quantity = qtyInput ? parseInt(qtyInput.value) : 1;
+    
+    const apiUrl = window.BASE_URL + 'pages/cart/Api_Cart.php';
+    
+    const params = new URLSearchParams();
+    params.append('action', 'add');
+    params.append('product_id', productId);
+    params.append('quantity', quantity);
+    
+    // Получаем CSRF токен из meta тега
+    const csrfToken = document.querySelector('meta[name="csrf-token"]');
+    
+    fetch(apiUrl, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/x-www-form-urlencoded',
+            'X-CSRF-TOKEN': csrfToken ? csrfToken.content : ''
+        },
+        body: params.toString()
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            // ИСПРАВЛЕНО: Вызываем updateCartCount() для обновления счетчика в меню
+            updateCartCount();
+            showToast(data.message || 'Товар добавлен в корзину', 'success');
+        } else {
+            showToast(data.message || 'Ошибка при добавлении', 'error');
+        }
+    })
+    .catch(error => {
+        console.error('Error:', error);
+        showToast('Ошибка соединения', 'error');
+    });
+}
+
+// ИСПРАВЛЕНО: Функция обновления счетчика корзины (как в product.php)
+function updateCartCount() {
+    fetch(window.BASE_URL + 'pages/cart/Api_Cart.php?action=count', {
+        headers: {
+            'X-Requested-With': 'XMLHttpRequest'
+        }
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success && data.count !== undefined) {
+            const cartCount = document.getElementById('cart-count');
+            if (cartCount) {
+                cartCount.textContent = data.count;
+            }
+        }
+    })
+    .catch(err => console.error('Error updating cart count:', err));
+}
+
 /**
  * Удаляет товар из сравнения на странице compare.php
  * @param {number} productId - ID товара для удаления
@@ -524,78 +584,36 @@ function updateCompareUrl(compareIds) {
     }
 }
 
-// Инициализация AJAX-форм добавления в корзину
-document.addEventListener('DOMContentLoaded', function() {
-    // Обрабатываем формы добавления в корзину через AJAX
-    document.querySelectorAll('.add-to-cart-form').forEach(form => {
-        form.addEventListener('submit', function(e) {
-            e.preventDefault();
-            
-            const formData = new FormData(this);
-            const submitBtn = this.querySelector('button[type="submit"]');
-            const originalBtnText = submitBtn.innerHTML;
-            
-            // Блокируем кнопку
-            submitBtn.disabled = true;
-            submitBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
-            
-            fetch(this.action, {
-                method: 'POST',
-                body: formData,
-                headers: {
-                    'X-Requested-With': 'XMLHttpRequest'
-                }
-            })
-            .then(response => {
-                if (response.redirected) {
-                    // Если редирект на корзину — считаем успехом
-                    showToast('Товар добавлен в корзину', 'success');
-                    // Обновляем счетчик корзины
-                    updateCartCount();
-                    return null;
-                }
-                return response.text();
-            })
-            .then(data => {
-                if (data !== null) {
-                    // Проверяем, не содержит ли ответ ошибку CSRF
-                    if (data.includes('CSRF') || data.includes('csrf')) {
-                        showToast('Ошибка безопасности. Обновите страницу.', 'error');
-                    } else {
-                        showToast('Товар добавлен в корзину', 'success');
-                        updateCartCount();
-                    }
-                }
-            })
-            .catch(error => {
-                console.error('Error:', error);
-                showToast('Ошибка при добавлении в корзину', 'error');
-            })
-            .finally(() => {
-                submitBtn.disabled = false;
-                submitBtn.innerHTML = originalBtnText;
-            });
-        });
-    });
-});
-
-// Функция обновления счетчика корзины
-function updateCartCount() {
-    fetch(window.BASE_URL + 'pages/cart/Api_Cart.php?action=count', {
-        headers: {
-            'X-Requested-With': 'XMLHttpRequest'
-        }
-    })
-    .then(response => response.json())
-    .then(data => {
-        if (data.success && data.count !== undefined) {
-            const cartCount = document.getElementById('cart-count');
-            if (cartCount) {
-                cartCount.textContent = data.count;
-            }
-        }
-    })
-    .catch(err => console.error('Error updating cart count:', err));
+// Функция показа уведомлений
+function showToast(message, type = 'success') {
+    let toastContainer = document.getElementById('toast-container');
+    if (!toastContainer) {
+        toastContainer = document.createElement('div');
+        toastContainer.id = 'toast-container';
+        toastContainer.style.cssText = 'position: fixed; bottom: 20px; right: 20px; z-index: 9999;';
+        document.body.appendChild(toastContainer);
+    }
+    
+    const toast = document.createElement('div');
+    const colors = { success: '#28a745', error: '#dc3545', warning: '#ffc107', info: '#17a2b8' };
+    toast.style.cssText = `
+        background-color: ${colors[type] || colors.success};
+        color: ${type === 'warning' ? '#333' : 'white'};
+        padding: 12px 20px;
+        border-radius: 8px;
+        margin-bottom: 10px;
+        box-shadow: 0 2px 10px rgba(0,0,0,0.2);
+        animation: slideIn 0.3s ease;
+        cursor: pointer;
+    `;
+    toast.innerHTML = `<div style="display: flex; align-items: center; gap: 10px;">
+        <i class="fas ${type === 'success' ? 'fa-check-circle' : 'fa-exclamation-circle'}"></i>
+        <span>${message}</span>
+    </div>`;
+    
+    toast.addEventListener('click', () => toast.remove());
+    toastContainer.appendChild(toast);
+    setTimeout(() => toast.remove(), 3000);
 }
 </script>
 

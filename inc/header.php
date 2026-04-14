@@ -5,6 +5,27 @@ if (session_status() === PHP_SESSION_NONE) {
     session_start();
 }
 
+// ===== ИСПРАВЛЕНИЕ: Загружаем compare_ids из БД ДО любых других операций =====
+// Это критически важно для всех страниц, включая cart.php
+function loadCompareIdsFromDb($db, $userId) {
+    if (!isset($db) || $db->connect_error || !$userId) {
+        return [];
+    }
+    
+    $stmt = $db->prepare("SELECT product_id FROM `compare` WHERE user_id = ? ORDER BY created_at DESC");
+    if (!$stmt) return [];
+    
+    $stmt->bind_param('i', $userId);
+    $stmt->execute();
+    $result = $stmt->get_result();
+    $ids = [];
+    while ($row = $result->fetch_assoc()) {
+        $ids[] = (int)$row['product_id'];
+    }
+    $stmt->close();
+    return $ids;
+}
+
 // Определение корневого пути проекта
 $project_folder = '/mobileshop/';
 $base_url = 'http://' . $_SERVER['HTTP_HOST'] . $project_folder;
@@ -24,6 +45,17 @@ if (!isset($db) || !$db || $db->connect_error) {
 // Генерация CSRF-токена если его нет
 if (empty($_SESSION['csrf_token'])) {
     $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
+}
+
+// ===== ИСПРАВЛЕНИЕ: Загружаем compare_ids для авторизованных пользователей =====
+if (isset($_SESSION['id']) && !$db_error) {
+    // Только если compare_ids еще не загружен или пуст
+    if (!isset($_SESSION['compare_ids']) || !is_array($_SESSION['compare_ids'])) {
+        $_SESSION['compare_ids'] = loadCompareIdsFromDb($db, $_SESSION['id']);
+    }
+} elseif (!isset($_SESSION['compare_ids'])) {
+    // Для гостей инициализируем пустым массивом
+    $_SESSION['compare_ids'] = [];
 }
 
 // Получение количества товаров в корзине
@@ -59,6 +91,9 @@ if (!$db_error && isset($_SESSION['id'])) {
 
 $_SESSION['cart_count'] = $cart_count;
 
+// ===== ИСПРАВЛЕНИЕ: Получаем количество товаров в сравнении =====
+$compare_count = count($_SESSION['compare_ids'] ?? []);
+
 // ПОЛУЧЕНИЕ КАТЕГОРИЙ ДЛЯ КАТАЛОГА
 $categories = [];
 if (!$db_error) {
@@ -80,6 +115,13 @@ if (!$db_error) {
     <title>Интернет магазин - ShopHub</title>
     
     <meta name="csrf-token" content="<?= htmlspecialchars($_SESSION['csrf_token']) ?>">
+    
+    <!-- ===== ИСПРАВЛЕНИЕ: Передаем начальные данные в JavaScript ===== -->
+    <script>
+        window.BASE_URL = '<?= $base_url ?>';
+        window.INITIAL_COMPARE_IDS = <?= json_encode($_SESSION['compare_ids'] ?? []) ?>;
+        window.INITIAL_COMPARE_COUNT = <?= $compare_count ?>;
+    </script>
     
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
@@ -203,7 +245,3 @@ if (!$db_error) {
         </nav>
     </div>
 </header>
-
-<script>
-window.BASE_URL = '<?= $base_url ?>';
-</script>

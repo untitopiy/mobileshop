@@ -2,6 +2,12 @@
 // Убедитесь, что нет никакого вывода до этой строки
 if (session_status() === PHP_SESSION_NONE) session_start();
 
+// ===== ИСПРАВЛЕНИЕ: Убеждаемся что compare_ids загружен =====
+// (загружается в header.php, но проверим на всякий случай)
+if (!isset($_SESSION['compare_ids'])) {
+    $_SESSION['compare_ids'] = [];
+}
+
 // Объявляем глобальную переменную $db, которая определена в header.php
 global $db;
 
@@ -64,6 +70,9 @@ if ($is_authenticated) {
     }
 }
 
+// ===== ИСПРАВЛЕНИЕ: Получаем актуальное количество товаров в сравнении =====
+$compare_count = count($_SESSION['compare_ids'] ?? []);
+
 // Глобальная переменная $base_url должна быть определена в header.php
 if (!isset($base_url)) {
     $base_url = '/mobileshop/';
@@ -106,10 +115,11 @@ if (!isset($base_url)) {
             <span>Акции</span>
         </div>
 
+        <!-- ===== ИСПРАВЛЕНИЕ: Используем $compare_count вместо жесткого 0 ===== -->
         <div class="nav-item" onclick="location.href='<?= $base_url; ?>pages/compare.php'" title="Сравнение">
             <i class="fas fa-balance-scale"></i>
             <span>Сравнение</span>
-            <span class="badge" id="compare-count">0</span>
+            <span class="badge" id="compare-count"><?= $compare_count; ?></span>
         </div>
 
         <div class="nav-item" onclick="location.href='<?= $base_url; ?>pages/wishlist.php'" title="Избранное">

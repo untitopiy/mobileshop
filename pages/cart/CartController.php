@@ -112,6 +112,9 @@ class CartController {
             $count = $this->guestService->getCartCount();
         }
         
+        // ИСПРАВЛЕНО: Обновляем сессию сразу
+        $_SESSION['cart_count'] = $count;
+        
         $this->jsonResponse([
             'success' => true, 
             'message' => 'Товар удален', 
@@ -147,6 +150,9 @@ class CartController {
         $count = $this->userId 
             ? $this->cartHelper->getCartCount($this->userId) 
             : $this->guestService->getCartCount();
+        
+        // ИСПРАВЛЕНО: Обновляем сессию сразу
+        $_SESSION['cart_count'] = $count;
         
         $this->jsonResponse([
             'success' => true,
@@ -215,13 +221,26 @@ class CartController {
         
         if ($this->userId) {
             $result = $this->cartHelper->addItem($this->userId, $productId, $quantity, $variationId);
+            $count = $this->cartHelper->getCartCount($this->userId);
         } else {
             $result = $this->guestService->addItem($productId, $quantity, $variationId);
+            $count = $this->guestService->getCartCount();
         }
         
-        $_SESSION[$result['success'] ? 'success' : 'error'] = $result['message'];
-        header("Location: cart.php");
-        exit;
+        // ИСПРАВЛЕНО: Обновляем сессию сразу после добавления
+        $_SESSION['cart_count'] = $count;
+        
+        if ($this->isAjaxRequest()) {
+            $this->jsonResponse([
+                'success' => $result['success'],
+                'message' => $result['message'],
+                'count' => $count
+            ]);
+        } else {
+            $_SESSION[$result['success'] ? 'success' : 'error'] = $result['message'];
+            header("Location: cart.php");
+            exit;
+        }
     }
     
     private function handleUpdateQuantities(): void {
@@ -246,6 +265,12 @@ class CartController {
             }
         }
         
+        // ИСПРАВЛЕНО: Обновляем сессию после обновления количеств
+        $count = $this->userId 
+            ? $this->cartHelper->getCartCount($this->userId) 
+            : $this->guestService->getCartCount();
+        $_SESSION['cart_count'] = $count;
+        
         if ($hasWarning) {
             $_SESSION['warning'] = "Количество некоторых товаров ограничено наличием на складе";
         }
@@ -267,22 +292,29 @@ class CartController {
         
         if ($this->userId) {
             $this->cartHelper->removeItem($this->userId, $productId, $variationId);
+            $count = $this->cartHelper->getCartCount($this->userId);
         } else {
             $this->guestService->removeItem($cartKey);
+            $count = $this->guestService->getCartCount();
         }
+        
+        // ИСПРАВЛЕНО: Обновляем сессию сразу после удаления
+        $_SESSION['cart_count'] = $count;
         
         header("Location: cart.php");
         exit;
     }
     
     private function renderCart(): void {
+        // ИСПРАВЛЕНО: Получаем данные корзины И обновляем сессию ДО рендеринга
         if ($this->userId) {
             $cartData = $this->cartHelper->getCartItems($this->userId);
-            $_SESSION['cart_count'] = $cartData['count'];
         } else {
             $cartData = $this->guestService->getCartItems();
-            $_SESSION['cart_count'] = $cartData['count'];
         }
+        
+        // КРИТИЧЕСКИ ВАЖНО: Обновляем $_SESSION['cart_count'] до подключения header.php
+        $_SESSION['cart_count'] = $cartData['count'] ?? 0;
         
         $shippingMethods = $this->getShippingMethods();
         

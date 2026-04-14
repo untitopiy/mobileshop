@@ -71,8 +71,50 @@ window.addEventListener('scroll', () => {
 // ========== ПЕРЕМЕННЫЕ ДЛЯ СРАВНЕНИЯ ==========
 let compareIds = [];
 
-// Загрузка ID сравнения (с приоритетом на БД для авторизованных)
+// ===== ИСПРАВЛЕНИЕ: Инициализация из window.INITIAL_COMPARE_IDS (переданных PHP) =====
+function initCompareIds() {
+    // Приоритет 1: данные из PHP (через window.INITIAL_COMPARE_IDS)
+    if (typeof window !== 'undefined' && window.INITIAL_COMPARE_IDS && Array.isArray(window.INITIAL_COMPARE_IDS)) {
+        compareIds = window.INITIAL_COMPARE_IDS;
+        // Синхронизируем с localStorage для консистентности
+        localStorage.setItem('compareIds', JSON.stringify(compareIds));
+        return;
+    }
+    
+    // Приоритет 2: localStorage (fallback)
+    const saved = localStorage.getItem('compareIds');
+    if (saved) {
+        try {
+            const parsed = JSON.parse(saved);
+            if (Array.isArray(parsed)) {
+                compareIds = parsed;
+                return;
+            }
+        } catch (e) {
+            console.error('Error parsing compareIds from localStorage:', e);
+        }
+    }
+    
+    // Приоритет 3: пустой массив
+    compareIds = [];
+}
+
+// Инициализируем немедленно при загрузке скрипта
+initCompareIds();
+
+// Загрузка ID сравнения из БД (только для синхронизации, не перезаписываем если пусто)
 function loadCompareIds() {
+    // Если у нас уже есть данные из PHP — не делаем лишний запрос сразу
+    if (typeof window !== 'undefined' && window.INITIAL_COMPARE_IDS && window.INITIAL_COMPARE_IDS.length > 0) {
+        // Проверим актуальность через 2 секунды (отложенная синхронизация)
+        setTimeout(doLoadCompareIds, 2000);
+        return;
+    }
+    
+    doLoadCompareIds();
+}
+
+function doLoadCompareIds() {
     fetch(window.BASE_URL + 'pages/update_compare.php', {
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -80,29 +122,20 @@ function loadCompareIds() {
     })
     .then(response => response.json())
     .then(data => {
-        if (data.success && data.compare_ids) {
-            compareIds = data.compare_ids;
-            localStorage.setItem('compareIds', JSON.stringify(compareIds));
-            updateCompareCount();
-            loadCompareStatus();
-            console.log('📦 Загружены ID сравнения:', compareIds);
-        } else {
-            const saved = localStorage.getItem('compareIds');
-            if (saved) {
-                compareIds = JSON.parse(saved);
+        if (data.success && data.compare_ids && Array.isArray(data.compare_ids)) {
+            // Обновляем только если сервер вернул данные
+            if (data.compare_ids.length > 0) {
+                compareIds = data.compare_ids;
+                localStorage.setItem('compareIds', JSON.stringify(compareIds));
                 updateCompareCount();
                 loadCompareStatus();
+                console.log('📦 Синхронизированы ID сравнения из БД:', compareIds);
             }
+            // Если сервер вернул пусто, но у нас есть данные — сохраняем наши
         }
     })
     .catch(error => {
-        console.error('Ошибка загрузки сравнения:', error);
-        const saved = localStorage.getItem('compareIds');
-        if (saved) {
-            compareIds = JSON.parse(saved);
-            updateCompareCount();
-            loadCompareStatus();
-        }
+        console.error('Ошибка синхронизации сравнения:', error);
     });
 }
 
@@ -121,7 +154,16 @@ function saveCompareIds() {
 function updateCompareCount() {
     const countBadge = document.getElementById('compare-count');
     if (countBadge) {
-        countBadge.textContent = compareIds.length;
+        const newCount = compareIds.length;
+        const oldCount = parseInt(countBadge.textContent) || 0;
+        
+        countBadge.textContent = newCount;
+        
+        // Анимация только при изменении и не при первой загрузке
+        if (oldCount !== newCount && oldCount !== 0) {
+            countBadge.style.transform = 'scale(1.3)';
+            setTimeout(() => countBadge.style.transform = 'scale(1)', 200);
+        }
     }
 }
 
@@ -596,23 +638,28 @@ function initLiveSearch() {
 
 // ========== СИНХРОНИЗАЦИЯ СРАВНЕНИЯ ПРИ ЗАГРУЗКЕ ==========
 function syncCompareOnLoad() {
-    const localIds = localStorage.getItem('compareIds');
-    const localCompareIds = localIds ? JSON.parse(localIds) : [];
-    
-    if (localCompareIds.length > 0 && window.location.pathname.includes('compare.php') && !window.location.search.includes('ids=')) {
-        window.location.href = window.BASE_URL + 'pages/compare.php?ids=' + localCompareIds.join(',');
+    // Не перенаправляем если уже на compare.php
+    if (window.location.pathname.includes('compare.php')) {
+        return;
     }
 }
 
 // ========== ИНИЦИАЛИЗАЦИЯ ПРИ ЗАГРУЗКЕ ==========
 
 document.addEventListener('DOMContentLoaded', function() {
-    // Инициализация корзины
+    // ===== ИСПРАВЛЕНИЕ: Порядок инициализации =====
+    
+    // 1. Сначала обновляем счетчик сравнения (данные уже загружены из PHP)
+    updateCompareCount();
+    loadCompareStatus();
+    
+    // 2. Инициализируем корзину
     updateCartCount();
     
-    // Инициализация избранного и сравнения
+    // 3. Отложенная синхронизация с БД (не блокирует отображение)
     loadCompareIds();
-    loadCompareStatus();
+    
+    // 4. Остальные инициализации
     loadWishlistStatus();
     updateWishlistCount();
     loadCompareFromUrl();
