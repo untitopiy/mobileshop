@@ -206,15 +206,20 @@ $selected_type = isset($_POST['type']) ? $_POST['type'] : 'simple';
 $selected_status = isset($_POST['status']) ? $_POST['status'] : 'active';
 ?>
 
-<div class="container-fluid my-5">
-    <div class="d-flex justify-content-between align-items-center mb-4">
-        <div>
-            <h1>Добавление товара</h1>
-            <p class="text-muted mb-0">Магазин: <strong><?= htmlspecialchars($seller_name) ?></strong></p>
-        </div>
-        <a href="dashboard.php" class="btn btn-secondary"><i class="fas fa-arrow-left"></i> Назад</a>
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <div>
+        <h1>Добавление товара</h1>
+        <p class="text-muted mb-0">Магазин: <strong><?= htmlspecialchars($seller_name) ?></strong></p>
     </div>
-
+    <div>
+        <a href="my_products.php" class="btn btn-primary me-2">
+            <i class="fas fa-box"></i> Мои товары
+        </a>
+        <a href="dashboard.php" class="btn btn-secondary">
+            <i class="fas fa-sync-alt"></i> Обновить
+        </a>
+    </div>
+</div>
     <?php if (!empty($errors)): ?>
         <div class="alert alert-danger">
             <ul class="mb-0">
