@@ -1,8 +1,68 @@
 <?php
 // Завершение контейнера (если открыт в других частях сайта)
 ?>
-    </div> <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    </div> 
+    <!-- 🔥 Bootstrap JS уже подключен в header.php, здесь не нужен дубль -->
+    <!-- <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script> -->
+    
+    <!-- Основные скрипты -->
     <script src="<?= $base_url; ?>inc/scripts.js"></script>
+
+    <!-- 🔥 КРИТИЧЕСКОЕ ИСПРАВЛЕНИЕ: Гарантированная инициализация dropdown -->
+    <script>
+    (function() {
+        'use strict';
+        
+        console.log('🔧 Footer: Проверка инициализации dropdown...');
+        
+        // Функция для инициализации всех dropdown
+        function initAllDropdowns() {
+            if (typeof bootstrap === 'undefined') {
+                console.error('❌ Bootstrap не загружен в footer!');
+                return;
+            }
+            
+            var dropdownToggles = document.querySelectorAll('[data-bs-toggle="dropdown"]');
+            console.log('📍 Footer: Найдено dropdown toggles:', dropdownToggles.length);
+            
+            var initialized = 0;
+            dropdownToggles.forEach(function(toggle, index) {
+                try {
+                    // Проверяем, не инициализирован ли уже
+                    var existing = bootstrap.Dropdown.getInstance(toggle);
+                    if (existing) {
+                        console.log('✅ Dropdown #' + index + ' уже инициализирован');
+                        initialized++;
+                        return;
+                    }
+                    
+                    // Создаем новый экземпляр
+                    new bootstrap.Dropdown(toggle, {
+                        autoClose: true,
+                        boundary: 'window'
+                    });
+                    initialized++;
+                    console.log('✅ Dropdown #' + index + ' инициализирован в footer');
+                } catch (error) {
+                    console.error('❌ Ошибка инициализации dropdown #' + index + ':', error);
+                }
+            });
+            
+            console.log('🎉 Footer: Инициализировано dropdown: ' + initialized + '/' + dropdownToggles.length);
+        }
+        
+        // Запускаем сразу
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', initAllDropdowns);
+        } else {
+            initAllDropdowns();
+        }
+        
+        // И еще раз через 100мс и 500мс для гарантии
+        setTimeout(initAllDropdowns, 100);
+        setTimeout(initAllDropdowns, 500);
+    })();
+    </script>
 
     <div id="chatbot-widget">
     <div id="chatbot-toggle" class="chatbot-toggle">
@@ -547,7 +607,7 @@ function updateMiniPanel() {
         let html = '';
         compareSelectedProducts.forEach((p, i) => {
             html += `<div class="mini-product-item">
-                <img src="${p.image}" alt="${escapeHtml(p.name)}" onerror="this.src='https://placehold.co/100x100?text=No+Image'"
+                <img src="${p.image}" alt="${escapeHtml(p.name)}" onerror="this.src='https://placehold.co/100x100?text=No+Image'">
                 <div class="mini-product-info">
                     <h6>${escapeHtml(p.name.substring(0, 30))}</h6>
                     <p>${escapeHtml(p.price)}</p>

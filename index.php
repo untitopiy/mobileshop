@@ -546,202 +546,57 @@ while ($v = $var_query->fetch_assoc()) {
     </div>
     <div class="footer-bottom">&copy; 2026 ShopHub Engine. Все права защищены.</div>
 </footer>
-
-<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 <script src="inc/scripts.js"></script>
 
+<!-- 🔥 ГАРАНТИРОВАННАЯ ИНИЦИАЛИЗАЦИЯ DROPDOWN (только для index.php) -->
 <script>
-/**
- * 🔥 ИСПРАВЛЕННАЯ ФУНКЦИЯ: Добавление в корзину через API
- * Использует URLSearchParams вместо FormData для правильной кодировки
- */
-function addToCart(productId, variationId = null, quantity = 1) {
-    console.log('🛒 addToCart called:', {productId, variationId, quantity});
+(function() {
+    'use strict';
     
-    // Формируем данные как URL-encoded строку
-    const params = new URLSearchParams();
-    params.append('product_id', productId);
-    params.append('quantity', quantity);
-    if (variationId && variationId !== 'null' && variationId !== '') {
-        params.append('variation_id', variationId);
-    }
+    console.log('🔧 Index: Проверка инициализации dropdown...');
     
-    fetch('pages/cart/Api_Cart.php?action=add', {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/x-www-form-urlencoded',
-        },
-        body: params.toString()
-    })
-    .then(response => {
-        console.log('📡 Response status:', response.status);
-        if (!response.ok) {
-            throw new Error('HTTP error! status: ' + response.status);
+    function initAllDropdowns() {
+        if (typeof bootstrap === 'undefined') {
+            console.error('❌ Bootstrap не загружен в index!');
+            return;
         }
-        return response.json();
-    })
-    .then(data => {
-        console.log('✅ Response data:', data);
         
-        if (data.success) {
-            // Обновляем счётчик корзины в шапке
-            updateCartCountDisplay(data.count);
-            showToast(data.message || 'Товар добавлен в корзину', 'success');
-        } else {
-            showToast(data.message || 'Ошибка при добавлении', 'error');
-        }
-    })
-    .catch(error => {
-        console.error('❌ Error:', error);
-        showToast('Ошибка соединения с сервером', 'error');
-    });
-}
-
-/**
- * 🔥 ОБНОВЛЁННАЯ ФУНКЦИЯ: Обновление отображения счётчика корзины
- */
-function updateCartCountDisplay(count) {
-    console.log('🔢 Updating cart count:', count);
-    
-    // Ищем все возможные элементы счётчика
-    const selectors = ['#cart-count', '#cart-badge', '.cart-count'];
-    
-    selectors.forEach(selector => {
-        const elements = document.querySelectorAll(selector);
-        elements.forEach(el => {
-            el.textContent = count;
-            // Анимация
-            el.style.transform = 'scale(1.3)';
-            setTimeout(() => el.style.transform = 'scale(1)', 200);
-        });
-    });
-}
-
-/**
- * 🔥 ФУНКЦИЯ: Показ уведомлений (toast)
- */
-function showToast(message, type = 'success') {
-    // Удаляем старые тосты
-    const oldToast = document.querySelector('.toast-notification');
-    if (oldToast) oldToast.remove();
-    
-    const toast = document.createElement('div');
-    toast.className = `toast-notification alert alert-${type === 'error' ? 'danger' : 'success'} position-fixed`;
-    toast.style.cssText = 'top: 20px; right: 20px; z-index: 9999; padding: 15px 25px; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.15); animation: slideIn 0.3s ease;';
-    toast.innerHTML = `
-        <i class="fas fa-${type === 'error' ? 'exclamation-circle' : 'check-circle'} me-2"></i>
-        ${message}
-    `;
-    
-    document.body.appendChild(toast);
-    
-    setTimeout(() => {
-        toast.style.opacity = '0';
-        toast.style.transform = 'translateX(100%)';
-        toast.style.transition = 'all 0.3s ease';
-        setTimeout(() => toast.remove(), 300);
-    }, 3000);
-}
-
-// Плавная прокрутка к каталогу
-document.getElementById('scroll-to-catalog-btn').addEventListener('click', function() {
-    const catalogHeader = document.getElementById('catalog-header');
-    if (catalogHeader) {
-        const offset = 80;
-        const elementPosition = catalogHeader.getBoundingClientRect().top;
-        const offsetPosition = elementPosition + window.pageYOffset - offset;
+        var dropdownToggles = document.querySelectorAll('[data-bs-toggle="dropdown"]');
+        console.log('📍 Index: Найдено dropdown toggles:', dropdownToggles.length);
         
-        window.scrollTo({
-            top: offsetPosition,
-            behavior: 'smooth'
+        var initialized = 0;
+        dropdownToggles.forEach(function(toggle, index) {
+            try {
+                var existing = bootstrap.Dropdown.getInstance(toggle);
+                if (existing) {
+                    console.log('✅ Dropdown #' + index + ' уже инициализирован');
+                    initialized++;
+                    return;
+                }
+                
+                new bootstrap.Dropdown(toggle, {
+                    autoClose: true,
+                    boundary: 'window'
+                });
+                initialized++;
+                console.log('✅ Dropdown #' + index + ' инициализирован в index');
+            } catch (error) {
+                console.error('❌ Ошибка инициализации dropdown #' + index + ':', error);
+            }
         });
+        
+        console.log('🎉 Index: Инициализировано dropdown: ' + initialized + '/' + dropdownToggles.length);
     }
-});
-
-// CSS анимация для toast
-const style = document.createElement('style');
-style.textContent = `
-    @keyframes slideIn {
-        from { transform: translateX(100%); opacity: 0; }
-        to { transform: translateX(0); opacity: 1; }
+    
+    // Запускаем несколько раз для гарантии
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', initAllDropdowns);
+    } else {
+        initAllDropdowns();
     }
-`;
-document.head.appendChild(style);
+    setTimeout(initAllDropdowns, 100);
+    setTimeout(initAllDropdowns, 500);
+})();
 </script>
-
-<style>
-.product-card {
-    cursor: pointer;
-    border: 1px solid #eee;
-    border-radius: 8px;
-    overflow: hidden;
-    transition: all 0.2s;
-    background: white;
-}
-.product-card:hover {
-    transform: translateY(-5px);
-    box-shadow: 0 5px 20px rgba(0,0,0,0.1);
-    border-color: #ddd;
-}
-.product-image-wrapper {
-    position: relative;
-    height: 180px;
-    overflow: hidden;
-    background: #f8f9fa;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    padding: 10px;
-}
-.product-image {
-    max-width: 100%;
-    max-height: 100%;
-    object-fit: contain;
-}
-.card-actions {
-    display: flex;
-    gap: 5px;
-    z-index: 10;
-}
-.action-btn {
-    background: white;
-    border: none;
-    border-radius: 50%;
-    width: 32px;
-    height: 32px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    cursor: pointer;
-    box-shadow: 0 2px 5px rgba(0,0,0,0.1);
-    transition: all 0.2s;
-}
-.action-btn:hover {
-    transform: scale(1.1);
-}
-.rating-stars i {
-    font-size: 12px;
-}
-.btn-add-cart {
-    background: #007bff;
-    color: white;
-    border: none;
-    padding: 8px 12px;
-    border-radius: 5px;
-    font-size: 14px;
-    cursor: pointer;
-    transition: background 0.2s;
-}
-.btn-add-cart:hover:not(:disabled) {
-    background: #0056b3;
-}
-.btn-add-cart:disabled {
-    opacity: 0.6;
-    cursor: not-allowed;
-}
-.sticky-top {
-    z-index: 100;
-}
-</style>
 
 <?php require_once __DIR__ . '/inc/footer.php'; ?>

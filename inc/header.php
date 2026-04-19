@@ -5,8 +5,7 @@ if (session_status() === PHP_SESSION_NONE) {
     session_start();
 }
 
-// ===== ИСПРАВЛЕНИЕ: Загружаем compare_ids из БД ДО любых других операций =====
-// Это критически важно для всех страниц, включая cart.php
+// ===== Загружаем compare_ids из БД =====
 function loadCompareIdsFromDb($db, $userId) {
     if (!isset($db) || $db->connect_error || !$userId) {
         return [];
@@ -30,7 +29,7 @@ function loadCompareIdsFromDb($db, $userId) {
 $project_folder = '/mobileshop/';
 $base_url = 'http://' . $_SERVER['HTTP_HOST'] . $project_folder;
 
-// Подключение к базе данных и функциям - используем абсолютный путь
+// Подключение к базе данных и функциям
 require_once $_SERVER['DOCUMENT_ROOT'] . '/mobileshop/inc/db.php';
 require_once $_SERVER['DOCUMENT_ROOT'] . '/mobileshop/inc/functions.php';
 
@@ -42,19 +41,17 @@ if (!isset($db) || !$db || $db->connect_error) {
     $db_error = false;
 }
 
-// Генерация CSRF-токена если его нет
+// Генерация CSRF-токена
 if (empty($_SESSION['csrf_token'])) {
     $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
 }
 
-// ===== ИСПРАВЛЕНИЕ: Загружаем compare_ids для авторизованных пользователей =====
+// Загружаем compare_ids
 if (isset($_SESSION['id']) && !$db_error) {
-    // Только если compare_ids еще не загружен или пуст
     if (!isset($_SESSION['compare_ids']) || !is_array($_SESSION['compare_ids'])) {
         $_SESSION['compare_ids'] = loadCompareIdsFromDb($db, $_SESSION['id']);
     }
 } elseif (!isset($_SESSION['compare_ids'])) {
-    // Для гостей инициализируем пустым массивом
     $_SESSION['compare_ids'] = [];
 }
 
@@ -62,21 +59,13 @@ if (isset($_SESSION['id']) && !$db_error) {
 $cart_count = 0;
 if (!$db_error && isset($_SESSION['id'])) {
     $tables_exist = false;
-    
     $check_cart = $db->query("SHOW TABLES LIKE 'cart'");
     $check_cart_items = $db->query("SHOW TABLES LIKE 'cart_items'");
-    
     if ($check_cart && $check_cart_items && $check_cart->num_rows > 0 && $check_cart_items->num_rows > 0) {
         $tables_exist = true;
     }
-    
     if ($tables_exist) {
-        $stmt = $db->prepare("
-            SELECT COALESCE(SUM(ci.quantity), 0) as total 
-            FROM cart c
-            LEFT JOIN cart_items ci ON ci.cart_id = c.id
-            WHERE c.user_id = ?
-        ");
+        $stmt = $db->prepare("SELECT COALESCE(SUM(ci.quantity), 0) as total FROM cart c LEFT JOIN cart_items ci ON ci.cart_id = c.id WHERE c.user_id = ?");
         if ($stmt) {
             $stmt->bind_param('i', $_SESSION['id']);
             $stmt->execute();
@@ -90,11 +79,9 @@ if (!$db_error && isset($_SESSION['id'])) {
 }
 
 $_SESSION['cart_count'] = $cart_count;
-
-// ===== ИСПРАВЛЕНИЕ: Получаем количество товаров в сравнении =====
 $compare_count = count($_SESSION['compare_ids'] ?? []);
 
-// ПОЛУЧЕНИЕ КАТЕГОРИЙ ДЛЯ КАТАЛОГА
+// ПОЛУЧЕНИЕ КАТЕГОРИЙ
 $categories = [];
 if (!$db_error) {
     $cat_query = "SELECT id, name FROM categories ORDER BY name ASC";
@@ -111,18 +98,17 @@ if (!$db_error) {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta http-equiv="X-UA-Compatible" content="IE=edge">
     <title>Интернет магазин - ShopHub</title>
     
     <meta name="csrf-token" content="<?= htmlspecialchars($_SESSION['csrf_token']) ?>">
     
-    <!-- ===== ИСПРАВЛЕНИЕ: Передаем начальные данные в JavaScript ===== -->
     <script>
         window.BASE_URL = '<?= $base_url ?>';
         window.INITIAL_COMPARE_IDS = <?= json_encode($_SESSION['compare_ids'] ?? []) ?>;
         window.INITIAL_COMPARE_COUNT = <?= $compare_count ?>;
     </script>
     
+    <!-- Bootstrap CSS -->
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <link rel="stylesheet" href="<?php echo $base_url; ?>inc/styles.css">
@@ -154,6 +140,22 @@ if (!$db_error) {
             transition: background 0.2s;
         }
         .catalog-list a:hover { background: #f8f9fa; color: #0d6efd; }
+        
+        /* Dropdown меню админа */
+        .dropdown-menu {
+            z-index: 9999 !important;
+        }
+        .dropdown {
+            position: relative !important;
+        }
+        .old-menu-wrapper {
+            position: relative;
+            z-index: 1000;
+        }
+        .navigation-wrapper {
+            position: relative;
+            z-index: 1001;
+        }
         
         .cart-link {
             position: relative;
@@ -201,7 +203,7 @@ if (!$db_error) {
     <?php unset($_SESSION['cart_merge_notice']); ?>
 <?php endif; ?>
 
-<header class="main-header">
+<header class="main-header" style="position: relative; z-index: 1000;">
     <div class="container-fluid header-container" style="padding: 0 20px;">
         <div class="logo" onclick="location.href='<?php echo $base_url; ?>'" style="cursor: pointer;">SHOP<span>HUB</span></div>
 
@@ -245,3 +247,74 @@ if (!$db_error) {
         </nav>
     </div>
 </header>
+
+<!-- 🔥 КРИТИЧЕСКОЕ ИСПРАВЛЕНИЕ: Bootstrap JS подключаем здесь для ВСЕХ страниц -->
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+
+<!-- 🔥 КРИТИЧЕСКОЕ ИСПРАВЛЕНИЕ: Инициализация dropdown с проверкой дублирования -->
+<script>
+// Глобальные переменные с проверкой существования
+if (typeof window.API_CONFIG === 'undefined') {
+    window.API_CONFIG = {
+        cartBaseUrl: (window.BASE_URL || '/mobileshop/') + 'pages/cart/Api_Cart.php'
+    };
+}
+
+// 🔥 ГЛОБАЛЬНАЯ ФУНКЦИЯ: Инициализация всех dropdown на странице
+window.initBootstrapDropdowns = function() {
+    'use strict';
+    
+    console.log('🔍 Проверка Bootstrap:', typeof bootstrap);
+    
+    if (typeof bootstrap === 'undefined') {
+        console.error('❌ Bootstrap не загружен!');
+        return false;
+    }
+    
+    var dropdownToggles = document.querySelectorAll('[data-bs-toggle="dropdown"]');
+    console.log('📍 Найдено dropdown toggles:', dropdownToggles.length);
+    
+    if (dropdownToggles.length === 0) {
+        console.log('ℹ️ Нет dropdown для инициализации');
+        return true;
+    }
+    
+    var initialized = 0;
+    
+    dropdownToggles.forEach(function(toggle, index) {
+        try {
+            // Проверяем, не инициализирован ли уже
+            var existing = bootstrap.Dropdown.getInstance(toggle);
+            if (existing) {
+                console.log('✅ Dropdown #' + index + ' уже инициализирован');
+                initialized++;
+                return;
+            }
+            
+            // Создаем новый экземпляр
+            var dropdown = new bootstrap.Dropdown(toggle, {
+                autoClose: true,
+                boundary: 'window'
+            });
+            
+            console.log('✅ Dropdown #' + index + ' инициализирован:', toggle.id || toggle.textContent.trim());
+            initialized++;
+        } catch (error) {
+            console.error('❌ Ошибка инициализации dropdown #' + index + ':', error);
+        }
+    });
+    
+    console.log('🎉 Инициализировано dropdown: ' + initialized + '/' + dropdownToggles.length);
+    return initialized > 0;
+};
+
+// Запускаем инициализацию
+(function init() {
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', window.initBootstrapDropdowns);
+    } else {
+        // DOM уже загружен, запускаем сразу
+        window.initBootstrapDropdowns();
+    }
+})();
+</script>

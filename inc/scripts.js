@@ -1,26 +1,31 @@
 // inc/scripts.js - Полный файл со всеми скриптами
 
-// Глобальная конфигурация API
-const API_CONFIG = {
-    cartBaseUrl: window.BASE_URL + 'pages/cart/Api_Cart.php'
+// 🔥 ИСПРАВЛЕНИЕ: Все глобальные переменные через var с проверкой существования
+var API_CONFIG = window.API_CONFIG || {
+    cartBaseUrl: (window.BASE_URL || '/mobileshop/') + 'pages/cart/Api_Cart.php'
 };
+
+// Глобальная переменная для сравнения
+var compareIds = window.compareIds || [];
 
 // Получение CSRF-токена
 function getCsrfToken() {
-    const metaToken = document.querySelector('meta[name="csrf-token"]');
+    var metaToken = document.querySelector('meta[name="csrf-token"]');
     if (metaToken) return metaToken.content;
-    const inputToken = document.querySelector('input[name="csrf_token"]');
+    var inputToken = document.querySelector('input[name="csrf_token"]');
     if (inputToken) return inputToken.value;
     return '';
 }
 
 // Плавная прокрутка к секциям
-document.querySelectorAll('a[href^="#"]').forEach(anchor => {
+document.querySelectorAll('a[href^="#"]').forEach(function(anchor) {
     anchor.addEventListener('click', function(e) {
-        const href = this.getAttribute('href');
-        if (href && href.startsWith('#')) {
+        var href = this.getAttribute('href');
+        // Проверяем что href не просто "#", а содержит реальный id
+        if (href && href.length > 1 && href.startsWith('#')) {
             e.preventDefault();
-            const target = document.querySelector(href);
+            var targetId = href.substring(1);
+            var target = document.getElementById(targetId);
             if (target) {
                 target.scrollIntoView({
                     behavior: 'smooth',
@@ -32,18 +37,18 @@ document.querySelectorAll('a[href^="#"]').forEach(anchor => {
 });
 
 // Hover эффекты для карточек
-document.querySelectorAll('.card').forEach(card => {
-    card.addEventListener('mouseenter', () => {
-        card.classList.add('hovered');
+document.querySelectorAll('.card').forEach(function(card) {
+    card.addEventListener('mouseenter', function() {
+        this.classList.add('hovered');
     });
-    card.addEventListener('mouseleave', () => {
-        card.classList.remove('hovered');
+    card.addEventListener('mouseleave', function() {
+        this.classList.remove('hovered');
     });
 });
 
 // Инициализация слайдера Bootstrap
-const carousel = document.querySelector('.carousel');
-if (carousel) {
+var carousel = document.querySelector('.carousel');
+if (carousel && typeof bootstrap !== 'undefined') {
     new bootstrap.Carousel(carousel, {
         interval: 5000,
         ride: 'carousel'
@@ -51,14 +56,14 @@ if (carousel) {
 }
 
 function scrollToSection(sectionId) {
-    const section = document.getElementById(sectionId);
+    var section = document.getElementById(sectionId);
     if (section) {
         section.scrollIntoView({ behavior: 'smooth' });
     }
 }
 
-window.addEventListener('scroll', () => {
-    const scrollUpButton = document.querySelector('.scroll-up');
+window.addEventListener('scroll', function() {
+    var scrollUpButton = document.querySelector('.scroll-up');
     if (scrollUpButton) {
         if (window.scrollY > 300) {
             scrollUpButton.classList.add('show');
@@ -69,23 +74,19 @@ window.addEventListener('scroll', () => {
 });
 
 // ========== ПЕРЕМЕННЫЕ ДЛЯ СРАВНЕНИЯ ==========
-let compareIds = [];
 
-// ===== ИСПРАВЛЕНИЕ: Инициализация из window.INITIAL_COMPARE_IDS (переданных PHP) =====
+// Инициализация из window.INITIAL_COMPARE_IDS
 function initCompareIds() {
-    // Приоритет 1: данные из PHP (через window.INITIAL_COMPARE_IDS)
     if (typeof window !== 'undefined' && window.INITIAL_COMPARE_IDS && Array.isArray(window.INITIAL_COMPARE_IDS)) {
         compareIds = window.INITIAL_COMPARE_IDS;
-        // Синхронизируем с localStorage для консистентности
         localStorage.setItem('compareIds', JSON.stringify(compareIds));
         return;
     }
     
-    // Приоритет 2: localStorage (fallback)
-    const saved = localStorage.getItem('compareIds');
+    var saved = localStorage.getItem('compareIds');
     if (saved) {
         try {
-            const parsed = JSON.parse(saved);
+            var parsed = JSON.parse(saved);
             if (Array.isArray(parsed)) {
                 compareIds = parsed;
                 return;
@@ -95,18 +96,14 @@ function initCompareIds() {
         }
     }
     
-    // Приоритет 3: пустой массив
     compareIds = [];
 }
 
-// Инициализируем немедленно при загрузке скрипта
 initCompareIds();
 
-// Загрузка ID сравнения из БД (только для синхронизации, не перезаписываем если пусто)
+// Загрузка ID сравнения из БД
 function loadCompareIds() {
-    // Если у нас уже есть данные из PHP — не делаем лишний запрос сразу
     if (typeof window !== 'undefined' && window.INITIAL_COMPARE_IDS && window.INITIAL_COMPARE_IDS.length > 0) {
-        // Проверим актуальность через 2 секунды (отложенная синхронизация)
         setTimeout(doLoadCompareIds, 2000);
         return;
     }
@@ -120,21 +117,18 @@ function doLoadCompareIds() {
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
         body: 'get_ids=1'
     })
-    .then(response => response.json())
-    .then(data => {
+    .then(function(response) { return response.json(); })
+    .then(function(data) {
         if (data.success && data.compare_ids && Array.isArray(data.compare_ids)) {
-            // Обновляем только если сервер вернул данные
             if (data.compare_ids.length > 0) {
                 compareIds = data.compare_ids;
                 localStorage.setItem('compareIds', JSON.stringify(compareIds));
                 updateCompareCount();
                 loadCompareStatus();
-                console.log('📦 Синхронизированы ID сравнения из БД:', compareIds);
             }
-            // Если сервер вернул пусто, но у нас есть данные — сохраняем наши
         }
     })
-    .catch(error => {
+    .catch(function(error) {
         console.error('Ошибка синхронизации сравнения:', error);
     });
 }
@@ -147,30 +141,29 @@ function saveCompareIds() {
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
         body: 'ids=' + JSON.stringify(compareIds)
-    }).catch(e => console.error('Ошибка синхронизации:', e));
+    }).catch(function(e) { console.error('Ошибка синхронизации:', e); });
 }
 
 // Обновление счетчика сравнения
 function updateCompareCount() {
-    const countBadge = document.getElementById('compare-count');
+    var countBadge = document.getElementById('compare-count');
     if (countBadge) {
-        const newCount = compareIds.length;
-        const oldCount = parseInt(countBadge.textContent) || 0;
+        var newCount = compareIds.length;
+        var oldCount = parseInt(countBadge.textContent) || 0;
         
         countBadge.textContent = newCount;
         
-        // Анимация только при изменении и не при первой загрузке
         if (oldCount !== newCount && oldCount !== 0) {
             countBadge.style.transform = 'scale(1.3)';
-            setTimeout(() => countBadge.style.transform = 'scale(1)', 200);
+            setTimeout(function() { countBadge.style.transform = 'scale(1)'; }, 200);
         }
     }
 }
 
 // Загрузка статуса сравнения для всех товаров на странице
 function loadCompareStatus() {
-    compareIds.forEach(productId => {
-        const compareIcon = document.getElementById(`compare-icon-${productId}`);
+    compareIds.forEach(function(productId) {
+        var compareIcon = document.getElementById('compare-icon-' + productId);
         if (compareIcon) {
             compareIcon.style.color = '#ffc107';
             compareIcon.classList.add('active');
@@ -185,15 +178,15 @@ function toggleCompare(productId) {
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
         body: 'toggle=' + productId
     })
-    .then(response => response.json())
-    .then(data => {
+    .then(function(response) { return response.json(); })
+    .then(function(data) {
         if (data.success) {
             compareIds = data.compare_ids;
             localStorage.setItem('compareIds', JSON.stringify(compareIds));
             updateCompareCount();
             showToast(data.message, data.action === 'added' ? 'success' : 'info');
             
-            const compareIcon = document.getElementById(`compare-icon-${productId}`);
+            var compareIcon = document.getElementById('compare-icon-' + productId);
             if (compareIcon) {
                 if (data.action === 'added') {
                     compareIcon.style.color = '#ffc107';
@@ -207,7 +200,7 @@ function toggleCompare(productId) {
             showToast(data.message || 'Ошибка', 'error');
         }
     })
-    .catch(error => {
+    .catch(function(error) {
         console.error('Error:', error);
         showToast('Ошибка соединения', 'error');
     });
@@ -224,12 +217,12 @@ function goToCompare() {
 
 // Загрузка ID сравнения из URL
 function loadCompareFromUrl() {
-    const urlParams = new URLSearchParams(window.location.search);
-    const ids = urlParams.get('ids');
+    var urlParams = new URLSearchParams(window.location.search);
+    var ids = urlParams.get('ids');
     if (ids) {
-        const newIds = ids.split(',').map(Number);
-        let changed = false;
-        newIds.forEach(id => {
+        var newIds = ids.split(',').map(Number);
+        var changed = false;
+        newIds.forEach(function(id) {
             if (!compareIds.includes(id) && compareIds.length < 4) {
                 compareIds.push(id);
                 changed = true;
@@ -251,13 +244,13 @@ function removeFromCompare(productId) {
             headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
             body: 'remove=' + productId
         })
-        .then(response => response.json())
-        .then(data => {
+        .then(function(response) { return response.json(); })
+        .then(function(data) {
             if (data.success) {
                 compareIds = data.compare_ids;
                 localStorage.setItem('compareIds', JSON.stringify(compareIds));
                 updateCompareCount();
-                const compareIcon = document.getElementById(`compare-icon-${productId}`);
+                var compareIcon = document.getElementById('compare-icon-' + productId);
                 if (compareIcon) {
                     compareIcon.style.color = '';
                     compareIcon.classList.remove('active');
@@ -271,7 +264,7 @@ function removeFromCompare(productId) {
                 alert(data.message || 'Ошибка при удалении');
             }
         })
-        .catch(error => {
+        .catch(function(error) {
             console.error('Error:', error);
             alert('Ошибка при удалении');
         });
@@ -285,13 +278,13 @@ function clearAllCompare() {
             headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
             body: 'clear_all=1'
         })
-        .then(response => response.json())
-        .then(data => {
+        .then(function(response) { return response.json(); })
+        .then(function(data) {
             if (data.success) {
                 compareIds = [];
                 localStorage.removeItem('compareIds');
                 updateCompareCount();
-                document.querySelectorAll('[id^="compare-icon-"]').forEach(icon => {
+                document.querySelectorAll('[id^="compare-icon-"]').forEach(function(icon) {
                     icon.style.color = '';
                     icon.classList.remove('active');
                 });
@@ -301,7 +294,7 @@ function clearAllCompare() {
                 alert(data.message || 'Ошибка при очистке');
             }
         })
-        .catch(error => {
+        .catch(function(error) {
             console.error('Error:', error);
             alert('Ошибка при очистке');
         });
@@ -312,11 +305,11 @@ function clearAllCompare() {
 
 function loadWishlistStatus() {
     fetch(window.BASE_URL + 'pages/wishlist.php?ajax_list=1')
-        .then(response => response.json())
-        .then(data => {
+        .then(function(response) { return response.json(); })
+        .then(function(data) {
             if (data.success && data.wishlist) {
-                data.wishlist.forEach(productId => {
-                    const icon = document.getElementById(`wishlist-icon-${productId}`);
+                data.wishlist.forEach(function(productId) {
+                    var icon = document.getElementById('wishlist-icon-' + productId);
                     if (icon) {
                         icon.classList.remove('far');
                         icon.classList.add('fas');
@@ -325,16 +318,16 @@ function loadWishlistStatus() {
                 });
             }
         })
-        .catch(error => console.error('Error:', error));
+        .catch(function(error) { console.error('Error:', error); });
 }
 
 function toggleWishlist(productId) {
     fetch(window.BASE_URL + 'pages/wishlist.php?check_auth=1')
-        .then(response => response.json())
-        .then(data => {
+        .then(function(response) { return response.json(); })
+        .then(function(data) {
             if (!data.authenticated) {
                 showToast('Необходимо авторизоваться', 'warning');
-                setTimeout(() => {
+                setTimeout(function() {
                     window.location.href = window.BASE_URL + 'pages/auth.php';
                 }, 1500);
                 return;
@@ -345,10 +338,10 @@ function toggleWishlist(productId) {
                 headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
                 body: 'ajax_add_wishlist=1&product_id=' + productId
             })
-            .then(response => response.json())
-            .then(data => {
+            .then(function(response) { return response.json(); })
+            .then(function(data) {
                 if (data.success) {
-                    const icon = document.getElementById(`wishlist-icon-${productId}`);
+                    var icon = document.getElementById('wishlist-icon-' + productId);
                     if (icon) {
                         if (data.action === 'added') {
                             icon.classList.remove('far');
@@ -364,7 +357,7 @@ function toggleWishlist(productId) {
                     updateWishlistCount();
                 }
             })
-            .catch(error => {
+            .catch(function(error) {
                 console.error('Error:', error);
                 showToast('Ошибка при добавлении в избранное', 'error');
             });
@@ -373,22 +366,23 @@ function toggleWishlist(productId) {
 
 function updateWishlistCount() {
     fetch(window.BASE_URL + 'pages/wishlist.php?ajax_count=1')
-        .then(response => response.json())
-        .then(data => {
-            const badge = document.getElementById('wishlist-count');
+        .then(function(response) { return response.json(); })
+        .then(function(data) {
+            var badge = document.getElementById('wishlist-count');
             if (badge) {
                 badge.textContent = data.count;
             }
         })
-        .catch(error => console.error('Error:', error));
+        .catch(function(error) { console.error('Error:', error); });
 }
 
 // ========== ФУНКЦИИ ДЛЯ КОРЗИНЫ ==========
 
-function addToCart(productId, variationId = null, quantity = 1) {
-    console.log('🛒 addToCart called:', {productId, variationId, quantity});
+function addToCart(productId, variationId, quantity) {
+    quantity = quantity || 1;
+    console.log('🛒 addToCart called:', {productId: productId, variationId: variationId, quantity: quantity});
     
-    const params = new URLSearchParams();
+    var params = new URLSearchParams();
     params.append('action', 'add');
     params.append('product_id', productId);
     params.append('quantity', quantity);
@@ -404,14 +398,14 @@ function addToCart(productId, variationId = null, quantity = 1) {
         },
         body: params.toString()
     })
-    .then(response => {
+    .then(function(response) {
         console.log('📡 Response status:', response.status);
         if (!response.ok) {
             throw new Error('HTTP error! status: ' + response.status);
         }
         return response.json();
     })
-    .then(data => {
+    .then(function(data) {
         console.log('✅ Response data:', data);
         
         if (data.success) {
@@ -421,7 +415,7 @@ function addToCart(productId, variationId = null, quantity = 1) {
             showToast(data.message || 'Ошибка при добавлении', 'error');
         }
     })
-    .catch(error => {
+    .catch(function(error) {
         console.error('❌ Error:', error);
         showToast('Ошибка соединения с сервером', 'error');
     });
@@ -430,14 +424,14 @@ function addToCart(productId, variationId = null, quantity = 1) {
 function updateCartCountDisplay(count) {
     console.log('🔢 Updating cart count:', count);
     
-    const selectors = ['#cart-count', '#cart-badge', '.cart-count', '.header-cart-count'];
+    var selectors = ['#cart-count', '#cart-badge', '.cart-count', '.header-cart-count'];
     
-    selectors.forEach(selector => {
-        const elements = document.querySelectorAll(selector);
-        elements.forEach(el => {
+    selectors.forEach(function(selector) {
+        var elements = document.querySelectorAll(selector);
+        elements.forEach(function(el) {
             el.textContent = count;
             el.style.transform = 'scale(1.3)';
-            setTimeout(() => el.style.transform = 'scale(1)', 200);
+            setTimeout(function() { el.style.transform = 'scale(1)'; }, 200);
         });
     });
 }
@@ -448,19 +442,21 @@ function updateCartCount() {
             'X-CSRF-TOKEN': getCsrfToken()
         }
     })
-    .then(response => response.json())
-    .then(data => {
+    .then(function(response) { return response.json(); })
+    .then(function(data) {
         if (data.success && data.count !== undefined) {
             updateCartCountDisplay(data.count);
         }
     })
-    .catch(error => console.error('Error updating cart count:', error));
+    .catch(function(error) { console.error('Error updating cart count:', error); });
 }
 
 // ========== ФУНКЦИЯ ДЛЯ УВЕДОМЛЕНИЙ (TOAST) ==========
 
-function showToast(message, type = 'success') {
-    let toastContainer = document.getElementById('toast-container');
+function showToast(message, type) {
+    type = type || 'success';
+    
+    var toastContainer = document.getElementById('toast-container');
     if (!toastContainer) {
         toastContainer = document.createElement('div');
         toastContainer.id = 'toast-container';
@@ -468,43 +464,31 @@ function showToast(message, type = 'success') {
         document.body.appendChild(toastContainer);
     }
     
-    const toast = document.createElement('div');
-    const colors = {
+    var toast = document.createElement('div');
+    var colors = {
         success: '#28a745',
         error: '#dc3545',
         warning: '#ffc107',
         info: '#17a2b8'
     };
     
-    toast.style.cssText = `
-        background-color: ${colors[type] || colors.success};
-        color: ${type === 'warning' ? '#333' : 'white'};
-        padding: 12px 20px;
-        border-radius: 8px;
-        margin-bottom: 10px;
-        box-shadow: 0 2px 10px rgba(0,0,0,0.2);
-        animation: slideIn 0.3s ease;
-        cursor: pointer;
-    `;
+    toast.style.cssText = 'background-color: ' + (colors[type] || colors.success) + '; color: ' + (type === 'warning' ? '#333' : 'white') + '; padding: 12px 20px; border-radius: 8px; margin-bottom: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.2); animation: slideIn 0.3s ease; cursor: pointer;';
     
-    toast.innerHTML = `
-        <div style="display: flex; align-items: center; gap: 10px;">
-            <i class="fas ${type === 'success' ? 'fa-check-circle' : type === 'error' ? 'fa-exclamation-circle' : 'fa-info-circle'}"></i>
-            <span>${message}</span>
-        </div>
-    `;
+    var iconClass = type === 'success' ? 'fa-check-circle' : (type === 'error' ? 'fa-exclamation-circle' : 'fa-info-circle');
     
-    toast.addEventListener('click', () => {
+    toast.innerHTML = '<div style="display: flex; align-items: center; gap: 10px;"><i class="fas ' + iconClass + '"></i><span>' + message + '</span></div>';
+    
+    toast.addEventListener('click', function() {
         toast.style.animation = 'slideOut 0.3s ease';
-        setTimeout(() => toast.remove(), 300);
+        setTimeout(function() { toast.remove(); }, 300);
     });
     
     toastContainer.appendChild(toast);
     
-    setTimeout(() => {
+    setTimeout(function() {
         if (toast.parentElement) {
             toast.style.animation = 'slideOut 0.3s ease';
-            setTimeout(() => toast.remove(), 300);
+            setTimeout(function() { toast.remove(); }, 300);
         }
     }, 3000);
 }
@@ -522,11 +506,12 @@ function toggleAction(type, productId) {
 // ========== ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ==========
 
 function debounce(func, wait) {
-    let timeout;
-    return function executedFunction(...args) {
-        const later = () => {
+    var timeout;
+    return function executedFunction() {
+        var args = arguments;
+        var later = function() {
             clearTimeout(timeout);
-            func(...args);
+            func.apply(null, args);
         };
         clearTimeout(timeout);
         timeout = setTimeout(later, wait);
@@ -534,9 +519,9 @@ function debounce(func, wait) {
 }
 
 function initFormConfirmations() {
-    document.querySelectorAll('form[data-confirm]').forEach(form => {
+    document.querySelectorAll('form[data-confirm]').forEach(function(form) {
         form.addEventListener('submit', function(e) {
-            const message = this.getAttribute('data-confirm');
+            var message = this.getAttribute('data-confirm');
             if (message && !confirm(message)) {
                 e.preventDefault();
             }
@@ -551,15 +536,15 @@ function removeFromWishlist(productId) {
             headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
             body: 'ajax_add_wishlist=1&product_id=' + productId
         })
-        .then(response => response.json())
-        .then(data => {
+        .then(function(response) { return response.json(); })
+        .then(function(data) {
             if (data.success) {
                 location.reload();
             } else {
                 alert('Ошибка при удалении');
             }
         })
-        .catch(error => {
+        .catch(function(error) {
             console.error('Error:', error);
             alert('Ошибка при удалении');
         });
@@ -568,30 +553,30 @@ function removeFromWishlist(productId) {
 
 function clearAllWishlist() {
     if (confirm('Вы уверены, что хотите очистить всё избранное?')) {
-        const removeButtons = document.querySelectorAll('.remove-from-wishlist');
-        let count = removeButtons.length;
-        let completed = 0;
+        var removeButtons = document.querySelectorAll('.remove-from-wishlist');
+        var count = removeButtons.length;
+        var completed = 0;
         
         if (count === 0) {
             location.reload();
             return;
         }
         
-        removeButtons.forEach(btn => {
-            const productId = btn.dataset.productId;
+        removeButtons.forEach(function(btn) {
+            var productId = btn.dataset.productId;
             fetch(window.BASE_URL + 'pages/wishlist.php', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
                 body: 'ajax_add_wishlist=1&product_id=' + productId
             })
-            .then(response => response.json())
-            .then(data => {
+            .then(function(response) { return response.json(); })
+            .then(function(data) {
                 completed++;
                 if (completed === count) {
                     location.reload();
                 }
             })
-            .catch(error => {
+            .catch(function(error) {
                 completed++;
                 if (completed === count) {
                     location.reload();
@@ -603,25 +588,25 @@ function clearAllWishlist() {
 
 // ========== ЖИВОЙ ПОИСК (AJAX) ==========
 function initLiveSearch() {
-    const searchInput = document.getElementById('global-search');
-    const searchResults = document.getElementById('search-results');
+    var searchInput = document.getElementById('global-search');
+    var searchResults = document.getElementById('search-results');
 
     if (!searchInput || !searchResults) return;
 
     searchInput.addEventListener('input', function() {
-        const query = this.value.trim();
+        var query = this.value.trim();
 
         if (query.length >= 2) {
             fetch(window.BASE_URL + 'search_ajax.php?q=' + encodeURIComponent(query))
-                .then(response => {
+                .then(function(response) {
                     if (!response.ok) throw new Error('Ошибка сети');
                     return response.text();
                 })
-                .then(data => {
+                .then(function(data) {
                     searchResults.innerHTML = data;
                     searchResults.style.display = 'block';
                 })
-                .catch(error => {
+                .catch(function(error) {
                     console.error('Ошибка поиска:', error);
                 });
         } else {
@@ -638,7 +623,6 @@ function initLiveSearch() {
 
 // ========== СИНХРОНИЗАЦИЯ СРАВНЕНИЯ ПРИ ЗАГРУЗКЕ ==========
 function syncCompareOnLoad() {
-    // Не перенаправляем если уже на compare.php
     if (window.location.pathname.includes('compare.php')) {
         return;
     }
@@ -647,19 +631,17 @@ function syncCompareOnLoad() {
 // ========== ИНИЦИАЛИЗАЦИЯ ПРИ ЗАГРУЗКЕ ==========
 
 document.addEventListener('DOMContentLoaded', function() {
-    // ===== ИСПРАВЛЕНИЕ: Порядок инициализации =====
-    
-    // 1. Сначала обновляем счетчик сравнения (данные уже загружены из PHP)
+    // Обновляем счетчик сравнения
     updateCompareCount();
     loadCompareStatus();
     
-    // 2. Инициализируем корзину
+    // Инициализируем корзину
     updateCartCount();
     
-    // 3. Отложенная синхронизация с БД (не блокирует отображение)
+    // Отложенная синхронизация с БД
     loadCompareIds();
     
-    // 4. Остальные инициализации
+    // Остальные инициализации
     loadWishlistStatus();
     updateWishlistCount();
     loadCompareFromUrl();
@@ -670,8 +652,8 @@ document.addEventListener('DOMContentLoaded', function() {
     initLiveSearch();
     
     // Каталог-меню
-    const trigger = document.getElementById('catalog-trigger');
-    const menu = document.getElementById('catalog-menu');
+    var trigger = document.getElementById('catalog-trigger');
+    var menu = document.getElementById('catalog-menu');
     if (trigger && menu) {
         trigger.addEventListener('click', function(e) {
             e.preventDefault();
@@ -689,15 +671,6 @@ document.addEventListener('DOMContentLoaded', function() {
 });
 
 // Добавляем стили для анимации уведомлений
-const style = document.createElement('style');
-style.textContent = `
-    @keyframes slideIn {
-        from { transform: translateX(100%); opacity: 0; }
-        to { transform: translateX(0); opacity: 1; }
-    }
-    @keyframes slideOut {
-        from { transform: translateX(0); opacity: 1; }
-        to { transform: translateX(100%); opacity: 0; }
-    }
-`;
-document.head.appendChild(style);
+var toastStyles = document.createElement('style');
+toastStyles.textContent = '@keyframes slideIn { from { transform: translateX(100%); opacity: 0; } to { transform: translateX(0); opacity: 1; } } @keyframes slideOut { from { transform: translateX(0); opacity: 1; } to { transform: translateX(100%); opacity: 0; } }';
+document.head.appendChild(toastStyles);
