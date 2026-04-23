@@ -234,13 +234,15 @@ if (!$db_error) {
             </div>
         </div>
 
-        <div class="search-wrapper d-flex align-items-center flex-grow-1 ms-4 me-4" style="max-width: 100%;">
-            <div style="position: relative; width: 100%;">
-                <input type="text" id="global-search" class="form-control" placeholder="Поиск электроники..." autocomplete="off">
-                <div id="search-results" class="search-results-dropdown"></div>
-            </div>
-            <button type="button" class="btn btn-primary ms-2"><i class="fas fa-search"></i></button>
-        </div>
+<div class="search-wrapper d-flex align-items-center ms-4 me-4" style="width: 100%; max-width: 600px;">
+    <div style="position: relative; width: 100%;">
+        <input type="text" id="global-search" class="form-control" placeholder="Поиск электроники..." autocomplete="off">
+        <div id="search-results" class="search-results-dropdown"></div>
+    </div>
+    <button type="button" class="btn btn-primary ms-2" style="width: 42px; height: 38px; padding: 0; display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0;">
+        <i class="fas fa-search"></i>
+    </button>
+</div>
 
         <nav class="old-menu-wrapper d-none d-lg-block">
             <?php include_once $_SERVER['DOCUMENT_ROOT'] . '/mobileshop/inc/menu.php'; ?>
