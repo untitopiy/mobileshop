@@ -1,5 +1,16 @@
-// Генерируем уникальный ID сессии
-const sessionId = 'session_' + Math.random().toString(36).substr(2, 9);
+// ============================================
+// chat.js — AI Консультант (исправленная версия)
+// ============================================
+
+// ИСПРАВЛЕНИЕ: Стабильный session_id в localStorage
+let sessionId = localStorage.getItem('chat_session_id');
+if (!sessionId) {
+    sessionId = 'session_' + Math.random().toString(36).substr(2, 9) + '_' + Date.now();
+    localStorage.setItem('chat_session_id', sessionId);
+    console.log('[CHAT] Создан новый sessionId:', sessionId);
+} else {
+    console.log('[CHAT] Восстановлен sessionId:', sessionId);
+}
 
 const messagesArea = document.getElementById('messagesArea');
 const userInput = document.getElementById('userInput');
@@ -60,6 +71,49 @@ function showTypingIndicator() {
     scrollToBottom();
 }
 
+// ============================================
+// ИСПРАВЛЕНИЕ: Загрузка истории при старте
+// ============================================
+async function loadChatHistory() {
+    console.log('[CHAT] Загрузка истории для:', sessionId);
+
+    try {
+        const response = await fetch('/api/chat-history?session_id=' + encodeURIComponent(sessionId));
+        console.log('[CHAT] Статус ответа:', response.status);
+
+        if (!response.ok) {
+            console.log('[CHAT] Ошибка загрузки истории');
+            return;
+        }
+
+        const data = await response.json();
+        console.log('[CHAT] Получено сообщений:', data.messages?.length || 0);
+
+        if (!data.messages || data.messages.length === 0) {
+            console.log('[CHAT] История пустая');
+            return;
+        }
+
+        // Очищаем текущие сообщения (кроме приветствия)
+        const existingMessages = messagesArea.querySelectorAll('.message');
+        for (let i = 1; i < existingMessages.length; i++) {
+            existingMessages[i].remove();
+        }
+
+        // Выводим историю
+        for (const msg of data.messages) {
+            if (msg.role === 'system') continue;
+            const type = msg.role === 'user' ? 'user' : 'bot';
+            addMessage(msg.content, type);
+        }
+
+        console.log('[CHAT] История загружена успешно');
+
+    } catch (error) {
+        console.error('[CHAT] Ошибка загрузки истории:', error);
+    }
+}
+
 async function sendMessage() {
     const messageText = userInput.value.trim();
     if (messageText === '' || isWaitingForResponse) return;
@@ -84,9 +138,9 @@ async function sendMessage() {
         });
 
         const data = await response.json();
-        
+
         removeTypingIndicator();
-        
+
         if (data.error) {
             addMessage('Ошибка: ' + data.error, 'bot');
         } else {
@@ -120,7 +174,7 @@ clearBtn.addEventListener('click', async () => {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ session_id: sessionId })
         });
-        
+
         // Очищаем сообщения, оставляя только первое
         const messages = messagesArea.querySelectorAll('.message');
         for (let i = 1; i < messages.length; i++) {
@@ -129,6 +183,13 @@ clearBtn.addEventListener('click', async () => {
         removeTypingIndicator();
         isWaitingForResponse = false;
         sendBtn.disabled = false;
+
+        // ИСПРАВЛЕНИЕ: Сбрасываем session_id при очистке
+        localStorage.removeItem('chat_session_id');
+        sessionId = 'session_' + Math.random().toString(36).substr(2, 9) + '_' + Date.now();
+        localStorage.setItem('chat_session_id', sessionId);
+        console.log('[CHAT] Новый sessionId после очистки:', sessionId);
+
     } catch (error) {
         console.error('Error clearing chat:', error);
     }
@@ -145,7 +206,9 @@ suggestions.forEach(chip => {
     });
 });
 
-// Фокус при загрузке
+// ИСПРАВЛЕНИЕ: Загрузка истории при загрузке страницы
 window.addEventListener('load', () => {
+    console.log('[CHAT] Страница загружена, sessionId:', sessionId);
     userInput.focus();
+    loadChatHistory();
 });

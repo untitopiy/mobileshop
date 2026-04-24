@@ -74,12 +74,7 @@
             <button id="chatbot-close" class="chatbot-close">&times;</button>
         </div>
         <div id="chatbot-messages" class="chatbot-messages">
-            <div class="bot-message">
-                <div class="message-content">
-                    Привет! Я ваш AI-помощник. Могу помочь с подбором техники, сравнением товаров, оформлением заказа, доставкой и другими вопросами. Чем могу помочь?
-                </div>
-                <div class="message-time"><?= date('H:i') ?></div>
-            </div>
+            <!-- Приветственное сообщение будет добавлено через JS если история пуста -->
         </div>
         <div class="chatbot-input">
             <input type="text" id="chatbot-input" placeholder="Введите ваш вопрос..." maxlength="500">
@@ -771,6 +766,69 @@ document.addEventListener('DOMContentLoaded', function() {
     
     if (!toggle || !container) return;
     
+    // ========== 🆕 ЗАГРУЗКА ИСТОРИИ СООБЩЕНИЙ ==========
+    function loadChatHistory() {
+        const sessionId = '<?= session_id() ?>';
+        
+        fetch('http://localhost:5000/api/chat-history?session_id=' + encodeURIComponent(sessionId))
+            .then(r => r.json())
+            .then(data => {
+                if (data.messages && data.messages.length > 0) {
+                    // Очищаем контейнер (убираем приветственное сообщение)
+                    messages.innerHTML = '';
+                    
+                    // Выводим историю (последние 20 сообщений)
+                    data.messages.forEach(msg => {
+                        addMessage(msg.content, msg.role === 'assistant' ? 'bot' : 'user', false);
+                    });
+                    
+                    console.log('📜 История загружена:', data.messages.length, 'сообщений');
+                } else {
+                    // Если истории нет — показываем приветственное сообщение
+                    addWelcomeMessage();
+                }
+            })
+            .catch(err => {
+                console.log('📭 История не найдена или бот не запущен, показываем приветствие');
+                addWelcomeMessage();
+            });
+    }
+    
+    // ========== 🆕 ДОБАВЛЕНИЕ ПРИВЕТСТВЕННОГО СООБЩЕНИЯ ==========
+    function addWelcomeMessage() {
+        const time = new Date().toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
+        messages.innerHTML = `<div class="bot-message">
+            <div class="message-content">
+                Привет! Я ваш AI-помощник. Могу помочь с подбором техники, сравнением товаров, оформлением заказа, доставкой и другими вопросами. Чем могу помочь?
+            </div>
+            <div class="message-time">${time}</div>
+        </div>`;
+    }
+    
+    // ========== 🆕 СОХРАНЕНИЕ СООБЩЕНИЯ В ИСТОРИЮ ==========
+    function saveMessageToHistory(content, role) {
+        const sessionId = '<?= session_id() ?>';
+        
+        fetch('http://localhost:5000/api/save-message', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                session_id: sessionId,
+                content: content,
+                role: role
+            })
+        })
+        .then(r => r.json())
+        .then(data => {
+            if (data.status !== 'success') {
+                console.warn('⚠️ Не удалось сохранить сообщение:', data.message);
+            }
+        })
+        .catch(err => {
+            console.warn('⚠️ Ошибка сохранения сообщения:', err);
+        });
+    }
+    
     toggle.onclick = function(e) {
         e.preventDefault();
         container.classList.toggle('active');
@@ -778,7 +836,8 @@ document.addEventListener('DOMContentLoaded', function() {
     
     if (close) close.onclick = function() { container.classList.remove('active'); };
     
-    function addMessage(text, sender) {
+    // ========== 🔄 ОБНОВЛЕННАЯ ФУНКЦИЯ ДОБАВЛЕНИЯ СООБЩЕНИЯ ==========
+    function addMessage(text, sender, saveToHistory = true) {
         const div = document.createElement('div');
         div.className = sender + '-message';
         const time = new Date().toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
@@ -786,6 +845,12 @@ document.addEventListener('DOMContentLoaded', function() {
         messages.appendChild(div);
         messages.scrollTop = messages.scrollHeight;
         div.querySelectorAll('a').forEach(a => a.target = '_blank');
+        
+        // 🆕 Сохраняем в историю (если не загружаем из истории)
+        if (saveToHistory) {
+            const role = sender === 'bot' ? 'assistant' : 'user';
+            saveMessageToHistory(text, role);
+        }
     }
     
     function showTyping() {
@@ -804,9 +869,12 @@ document.addEventListener('DOMContentLoaded', function() {
         if (typing) typing.remove();
     }
     
+    // ========== 🔄 ОБНОВЛЕННАЯ ФУНКЦИЯ ОТПРАВКИ ==========
     function sendMessage() {
         const msg = input.value.trim();
         if (!msg) return;
+        
+        // 🆕 Сохраняем сообщение пользователя сразу
         addMessage(msg, 'user');
         input.value = '';
         showTyping();
@@ -819,6 +887,7 @@ document.addEventListener('DOMContentLoaded', function() {
         .then(r => r.json())
         .then(data => {
             hideTyping();
+            // 🆕 addMessage теперь автоматически сохранит ответ бота
             addMessage(data.response, 'bot');
         })
         .catch(() => {
@@ -829,6 +898,9 @@ document.addEventListener('DOMContentLoaded', function() {
     
     if (send) send.onclick = sendMessage;
     if (input) input.onkeypress = function(e) { if (e.key === 'Enter') sendMessage(); };
+    
+    // 🆕 Загружаем историю при старте
+    loadChatHistory();
     
     // Обработчики для кнопок быстрых действий
     const compareStartBtn = document.getElementById('compare-start-btn');

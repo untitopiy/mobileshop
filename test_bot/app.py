@@ -3,7 +3,11 @@ import json
 import logging
 import requests
 import re
-from flask import Flask, request, jsonify
+import csv
+import io
+import mysql.connector
+from mysql.connector import Error
+from flask import Flask, request, jsonify, send_file
 from flask_cors import CORS
 from dotenv import load_dotenv
 from datetime import datetime
@@ -29,11 +33,126 @@ OPENROUTER_API_KEY = os.getenv('OPENROUTER_API_KEY')
 YOUR_SITE_URL = os.getenv('YOUR_SITE_URL', 'http://localhost')
 YOUR_SITE_NAME = os.getenv('YOUR_SITE_NAME', 'AI Консультант магазина')
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
-OPENROUTER_MODEL = "stepfun/step-3.5-flash:free"
+OPENROUTER_MODEL = "nvidia/nemotron-3-super-120b-a12b:free"
+
+# Конфигурация MySQL
+DB_CONFIG = {
+    'host': os.getenv('DB_HOST', 'localhost'),
+    'user': os.getenv('DB_USER', 'root'),
+    'password': os.getenv('DB_PASSWORD', ''),
+    'database': os.getenv('DB_NAME', 'marketplace'),
+    'charset': 'utf8mb4',
+    'collation': 'utf8mb4_unicode_ci'
+}
 
 # Хранилище диалогов и последних сравненных товаров
 conversations = {}
-last_compared_products = {}  # {session_id: [product1, product2]}
+last_compared_products = {}
+
+# ========== MySQL ФУНКЦИИ ==========
+
+def get_db_connection():
+    """Создаёт подключение к MySQL"""
+    try:
+        conn = mysql.connector.connect(**DB_CONFIG)
+        return conn
+    except Error as e:
+        logger.error(f"❌ Ошибка подключения к MySQL: {e}")
+        return None
+
+
+def save_chat_session(session_id, messages, last_products=None):
+    """Сохраняет сессию чата в MySQL"""
+    if not session_id:
+        return False
+    
+    conn = get_db_connection()
+    if not conn:
+        return False
+    
+    try:
+        cursor = conn.cursor()
+        messages_json = json.dumps(messages, ensure_ascii=False)
+        products_json = json.dumps(last_products, ensure_ascii=False) if last_products else None
+        message_count = len(messages)
+        
+        cursor.execute("""
+            INSERT INTO chat_sessions 
+                (session_id, messages, last_products, message_count, 
+                 user_agent, ip_address, created_at, updated_at)
+            VALUES (%s, %s, %s, %s, %s, %s, NOW(), NOW())
+            ON DUPLICATE KEY UPDATE
+                messages = VALUES(messages),
+                last_products = VALUES(last_products),
+                message_count = VALUES(message_count),
+                user_agent = VALUES(user_agent),
+                ip_address = VALUES(ip_address),
+                updated_at = NOW()
+        """, (session_id, messages_json, products_json, message_count,
+              request.headers.get('User-Agent', '')[:255],
+              request.remote_addr[:45]))
+        
+        conn.commit()
+        logger.info(f"💾 Сессия сохранена: {session_id[:8]}... ({message_count} сообщений)")
+        return True
+    except Error as e:
+        logger.error(f"❌ Ошибка сохранения сессии: {e}")
+        return False
+    finally:
+        if conn and conn.is_connected():
+            cursor.close()
+            conn.close()
+
+
+def load_chat_session(session_id):
+    """Загружает сессию чата из MySQL"""
+    if not session_id:
+        return None, None
+    
+    conn = get_db_connection()
+    if not conn:
+        return None, None
+    
+    try:
+        cursor = conn.cursor(dictionary=True)
+        # УБРАНО ограничение 24 часа для тестирования
+        cursor.execute("""
+            SELECT messages, last_products 
+            FROM chat_sessions 
+            WHERE session_id = %s
+        """, (session_id,))
+        
+        row = cursor.fetchone()
+        if row:
+            messages = json.loads(row['messages']) if row['messages'] else []
+            products = json.loads(row['last_products']) if row['last_products'] else None
+            logger.info(f"📥 Сессия загружена из MySQL: {session_id[:8]}... ({len(messages)} сообщений)")
+            return messages, products
+        logger.info(f"📭 Сессия не найдена: {session_id[:8]}...")
+        return None, None
+    except Error as e:
+        logger.error(f"❌ Ошибка загрузки сессии: {e}")
+        return None, None
+    finally:
+        if conn.is_connected():
+            cursor.close()
+            conn.close()
+
+
+def safe_float(val, default=0):
+    """Безопасное преобразование в float"""
+    try:
+        return float(val) if val is not None else default
+    except (ValueError, TypeError):
+        return default
+
+
+def safe_int(val, default=0):
+    """Безопасное преобразование в int"""
+    try:
+        return int(float(val)) if val is not None else default
+    except (ValueError, TypeError):
+        return default
 
 
 def search_products(query):
@@ -68,206 +187,107 @@ def get_products_for_compare(product_ids):
     return []
 
 
-def generate_simple_recommendation(products):
-    """Генерирует простой совет на основе базовой информации"""
-    if len(products) < 2:
-        return ""
-    
-    p1 = products[0]
-    p2 = products[1]
-    
-    # Извлекаем базовые характеристики
-    p1_price = p1.get('price_value', 0)
-    p2_price = p2.get('price_value', 0)
-    p1_rating = p1.get('rating', 0)
-    p2_rating = p2.get('rating', 0)
-    p1_stock = p1.get('stock', 0)
-    p2_stock = p2.get('stock', 0)
-    p1_sales = p1.get('sales_count', 0)
-    p2_sales = p2.get('sales_count', 0)
-    
-    # Формируем совет
-    recommendation = []
-    p1_score = 0
-    p2_score = 0
-    
-    # Сравнение цены
-    if p1_price and p2_price:
-        if p1_price < p2_price:
-            p1_score += 1
-            recommendation.append(f"💰 **Цена**: {p1['name']} дешевле на {p2_price - p1_price:.0f} ₽")
-        elif p2_price < p1_price:
-            p2_score += 1
-            recommendation.append(f"💰 **Цена**: {p2['name']} дешевле на {p1_price - p2_price:.0f} ₽")
-    
-    # Сравнение рейтинга
-    if p1_rating > p2_rating:
-        p1_score += 1
-        recommendation.append(f"⭐ **Рейтинг**: {p1['name']} имеет более высокий рейтинг ({p1_rating} vs {p2_rating})")
-    elif p2_rating > p1_rating:
-        p2_score += 1
-        recommendation.append(f"⭐ **Рейтинг**: {p2['name']} имеет более высокий рейтинг ({p2_rating} vs {p1_rating})")
-    
-    # Сравнение популярности
-    if p1_sales > p2_sales:
-        p1_score += 1
-        recommendation.append(f"🔥 **Популярность**: {p1['name']} купили больше раз ({p1_sales} vs {p2_sales})")
-    elif p2_sales > p1_sales:
-        p2_score += 1
-        recommendation.append(f"🔥 **Популярность**: {p2['name']} купили больше раз ({p2_sales} vs {p1_sales})")
-    
-    # Сравнение наличия
-    if p1_stock > 0 and p2_stock == 0:
-        p1_score += 1
-        recommendation.append(f"📦 **Наличие**: {p1['name']} есть в наличии")
-    elif p2_stock > 0 and p1_stock == 0:
-        p2_score += 1
-        recommendation.append(f"📦 **Наличие**: {p2['name']} есть в наличии")
-    
-    # Определяем победителя
-    if p1_score > p2_score:
-        winner = p1['name']
-        verdict = f"🏆 **Мой вердикт**: **{winner}** выглядит более выгодным выбором! ✅"
-        if p1_price and p2_price and p1_price > p2_price:
-            verdict += f" Да, он дороже, но его преимущества оправдывают цену."
-        elif p1_price and p2_price and p1_price < p2_price:
-            verdict += f" При этом он еще и дешевле — отличное соотношение цены и качества!"
-    elif p2_score > p1_score:
-        winner = p2['name']
-        verdict = f"🏆 **Мой вердикт**: **{winner}** выглядит более выгодным выбором! ✅"
-        if p1_price and p2_price and p2_price > p1_price:
-            verdict += f" Да, он дороже, но его преимущества оправдывают цену."
-        elif p1_price and p2_price and p2_price < p1_price:
-            verdict += f" При этом он еще и дешевле — отличное соотношение цены и качества!"
-    else:
-        verdict = f"🤔 **Мой вердикт**: Оба товара примерно равны по характеристикам. Выбор зависит от ваших личных предпочтений!"
-        if p1_price and p2_price and p1_price < p2_price:
-            verdict += f" Если хотите сэкономить — выбирайте **{p1['name']}**."
-        elif p1_price and p2_price and p2_price < p1_price:
-            verdict += f" Если хотите сэкономить — выбирайте **{p2['name']}**."
-    
-    # Формируем итоговый совет
-    result = "<div style='background: #f0f7ff; padding: 15px; border-radius: 10px; margin: 10px 0; border-left: 4px solid #667eea;'>"
-    result += "<strong>💡 СОВЕТ ЭКСПЕРТА</strong><br><br>"
-    
-    if recommendation:
-        result += "<strong>📊 Почему такой выбор?</strong><br>"
-        for rec in recommendation:
-            result += f"• {rec}<br>"
-        result += "<br>"
-    
-    result += verdict
-    result += "</div>"
-    
-    return result
-
-
 def generate_recommendation(products):
-    """Генерирует совет на основе характеристик товаров"""
-    if len(products) < 2:
-        return ""
+    """Генерирует совет на основе характеристик товаров с защитой от ошибок"""
+    if not products or len(products) < 2:
+        return "<div style='background: #fff3cd; padding: 15px; border-radius: 10px;'>⚠️ Недостаточно данных для сравнения. Выберите 2 товара.</div>"
     
-    p1 = products[0]
-    p2 = products[1]
+    p1 = products[0] if isinstance(products[0], dict) else {}
+    p2 = products[1] if isinstance(products[1], dict) else {}
     
-    # Извлекаем ключевые характеристики
-    p1_price = p1.get('price_value', 0)
-    p2_price = p2.get('price_value', 0)
-    p1_rating = p1.get('rating', 0)
-    p2_rating = p2.get('rating', 0)
-    p1_stock = p1.get('stock', 0)
-    p2_stock = p2.get('stock', 0)
-    p1_sales = p1.get('sales_count', 0)
-    p2_sales = p2.get('sales_count', 0)
+    if not p1 or not p2:
+        return "<div style='background: #fff3cd; padding: 15px; border-radius: 10px;'>⚠️ Ошибка загрузки данных товаров.</div>"
     
-    # Получаем характеристики из specs
-    p1_specs = p1.get('specs', {})
-    p2_specs = p2.get('specs', {})
+    p1_price = safe_float(p1.get('price_value'))
+    p2_price = safe_float(p2.get('price_value'))
+    p1_rating = safe_float(p1.get('rating'))
+    p2_rating = safe_float(p2.get('rating'))
+    p1_stock = safe_int(p1.get('stock'))
+    p2_stock = safe_int(p2.get('stock'))
+    p1_sales = safe_int(p1.get('sales_count'))
+    p2_sales = safe_int(p2.get('sales_count'))
     
-    # Для смартфонов
+    p1_specs = p1.get('specs') if isinstance(p1.get('specs'), dict) else {}
+    p2_specs = p2.get('specs') if isinstance(p2.get('specs'), dict) else {}
+    
     p1_ram = None
     p2_ram = None
     
-    # Извлекаем значения из specs
-    for key, value in p1_specs.items():
+    for key, value in (p1_specs or {}).items():
         if isinstance(value, dict):
             val = value.get('value', '')
         else:
-            val = str(value)
+            val = str(value) if value is not None else ''
         
-        if 'ram' in key.lower() or ('память' in key.lower() and 'оператив' in key.lower()):
+        if val and ('ram' in key.lower() or ('память' in key.lower() and 'оператив' in key.lower())):
             p1_ram = val
     
-    for key, value in p2_specs.items():
+    for key, value in (p2_specs or {}).items():
         if isinstance(value, dict):
             val = value.get('value', '')
         else:
-            val = str(value)
+            val = str(value) if value is not None else ''
         
-        if 'ram' in key.lower() or ('память' in key.lower() and 'оператив' in key.lower()):
+        if val and ('ram' in key.lower() or ('память' in key.lower() and 'оператив' in key.lower())):
             p2_ram = val
     
-    # Формируем совет
     recommendation = []
     p1_score = 0
     p2_score = 0
     
-    # Сравнение цены
-    if p1_price < p2_price:
-        p1_score += 1
-        recommendation.append(f"💰 **Цена**: {p1['name']} дешевле на {p2_price - p1_price:.0f} ₽")
-    elif p2_price < p1_price:
-        p2_score += 1
-        recommendation.append(f"💰 **Цена**: {p2['name']} дешевле на {p1_price - p2_price:.0f} ₽")
+    if p1_price > 0 and p2_price > 0:
+        if p1_price < p2_price:
+            p1_score += 1
+            recommendation.append(f"💰 **Цена**: {p1.get('name', 'Товар 1')} дешевле на {p2_price - p1_price:.0f} ₽")
+        elif p2_price < p1_price:
+            p2_score += 1
+            recommendation.append(f"💰 **Цена**: {p2.get('name', 'Товар 2')} дешевле на {p1_price - p2_price:.0f} ₽")
     
-    # Сравнение рейтинга
-    if p1_rating > p2_rating:
-        p1_score += 1
-        recommendation.append(f"⭐ **Рейтинг**: {p1['name']} имеет более высокий рейтинг ({p1_rating} vs {p2_rating})")
-    elif p2_rating > p1_rating:
-        p2_score += 1
-        recommendation.append(f"⭐ **Рейтинг**: {p2['name']} имеет более высокий рейтинг ({p2_rating} vs {p1_rating})")
+    if p1_rating > 0 or p2_rating > 0:
+        if p1_rating > p2_rating:
+            p1_score += 1
+            recommendation.append(f"⭐ **Рейтинг**: {p1.get('name', 'Товар 1')} имеет более высокий рейтинг ({p1_rating:.1f} vs {p2_rating:.1f})")
+        elif p2_rating > p1_rating:
+            p2_score += 1
+            recommendation.append(f"⭐ **Рейтинг**: {p2.get('name', 'Товар 2')} имеет более высокий рейтинг ({p2_rating:.1f} vs {p1_rating:.1f})")
     
-    # Сравнение ОЗУ
     if p1_ram and p2_ram:
         try:
             p1_ram_num = int(re.search(r'\d+', str(p1_ram)).group())
             p2_ram_num = int(re.search(r'\d+', str(p2_ram)).group())
             if p1_ram_num > p2_ram_num:
                 p1_score += 1
-                recommendation.append(f"💾 **Оперативная память**: {p1['name']} имеет больше ОЗУ ({p1_ram})")
+                recommendation.append(f"💾 **Оперативная память**: {p1.get('name', 'Товар 1')} имеет больше ОЗУ ({p1_ram})")
             elif p2_ram_num > p1_ram_num:
                 p2_score += 1
-                recommendation.append(f"💾 **Оперативная память**: {p2['name']} имеет больше ОЗУ ({p2_ram})")
-        except:
+                recommendation.append(f"💾 **Оперативная память**: {p2.get('name', 'Товар 2')} имеет больше ОЗУ ({p2_ram})")
+        except (AttributeError, ValueError):
             pass
     
-    # Сравнение продаж (популярность)
-    if p1_sales > p2_sales:
-        p1_score += 1
-        recommendation.append(f"🔥 **Популярность**: {p1['name']} купили больше раз ({p1_sales} vs {p2_sales})")
-    elif p2_sales > p1_sales:
-        p2_score += 1
-        recommendation.append(f"🔥 **Популярность**: {p2['name']} купили больше раз ({p2_sales} vs {p1_sales})")
+    if p1_sales > 0 or p2_sales > 0:
+        if p1_sales > p2_sales:
+            p1_score += 1
+            recommendation.append(f"🔥 **Популярность**: {p1.get('name', 'Товар 1')} купили больше раз ({p1_sales} vs {p2_sales})")
+        elif p2_sales > p1_sales:
+            p2_score += 1
+            recommendation.append(f"🔥 **Популярность**: {p2.get('name', 'Товар 2')} купили больше раз ({p2_sales} vs {p1_sales})")
     
-    # Сравнение наличия
     if p1_stock > 0 and p2_stock == 0:
         p1_score += 1
-        recommendation.append(f"📦 **Наличие**: {p1['name']} есть в наличии, а {p2['name']} отсутствует")
+        recommendation.append(f"📦 **Наличие**: {p1.get('name', 'Товар 1')} есть в наличии")
     elif p2_stock > 0 and p1_stock == 0:
         p2_score += 1
-        recommendation.append(f"📦 **Наличие**: {p2['name']} есть в наличии, а {p1['name']} отсутствует")
+        recommendation.append(f"📦 **Наличие**: {p2.get('name', 'Товар 2')} есть в наличии")
     
-    # Определяем победителя
     if p1_score > p2_score:
-        winner = p1['name']
+        winner = p1.get('name', 'Товар 1')
         verdict = f"🏆 **Мой вердикт**: **{winner}** выглядит более выгодным выбором! ✅"
         if p1_price > p2_price:
             verdict += f" Да, он дороже, но его преимущества оправдывают цену."
         elif p1_price < p2_price:
             verdict += f" При этом он еще и дешевле — отличное соотношение цены и качества!"
     elif p2_score > p1_score:
-        winner = p2['name']
+        winner = p2.get('name', 'Товар 2')
         verdict = f"🏆 **Мой вердикт**: **{winner}** выглядит более выгодным выбором! ✅"
         if p2_price > p1_price:
             verdict += f" Да, он дороже, но его преимущества оправдывают цену."
@@ -275,12 +295,12 @@ def generate_recommendation(products):
             verdict += f" При этом он еще и дешевле — отличное соотношение цены и качества!"
     else:
         verdict = f"🤔 **Мой вердикт**: Оба товара примерно равны по характеристикам. Выбор зависит от ваших личных предпочтений!"
-        if p1_price < p2_price:
-            verdict += f" Если хотите сэкономить — выбирайте **{p1['name']}**."
-        elif p2_price < p1_price:
-            verdict += f" Если хотите сэкономить — выбирайте **{p2['name']}**."
+        if p1_price > 0 and p2_price > 0:
+            if p1_price < p2_price:
+                verdict += f" Если хотите сэкономить — выбирайте **{p1.get('name', 'Товар 1')}**."
+            elif p2_price < p1_price:
+                verdict += f" Если хотите сэкономить — выбирайте **{p2.get('name', 'Товар 2')}**."
     
-    # Формируем итоговый совет
     result = "<div style='background: #f0f7ff; padding: 15px; border-radius: 10px; margin: 10px 0; border-left: 4px solid #667eea;'>"
     result += "<strong>💡 СОВЕТ ЭКСПЕРТА</strong><br><br>"
     
@@ -297,11 +317,10 @@ def generate_recommendation(products):
 
 
 def format_compare_response(products, with_recommendation=True):
-    """Форматирует ответ с таблицей сравнения на основе характеристик из БД"""
+    """Форматирует ответ с таблицей сравнения"""
     if len(products) < 2:
         return "Недостаточно товаров для сравнения."
     
-    # Важные характеристики для отображения (приоритетные)
     priority_specs = [
         'nb_cpu_model', 'nb_cpu_cores', 'nb_cpu_frequency',
         'nb_ram_size', 'nb_ram_type',
@@ -313,21 +332,19 @@ def format_compare_response(products, with_recommendation=True):
         'hp_type', 'hp_connection', 'hp_battery_life'
     ]
     
-    # Собираем все уникальные характеристики из товаров
     all_specs = set()
     for p in products:
-        for spec_key in p.get('specs', {}):
-            all_specs.add(spec_key)
+        specs = p.get('specs', {})
+        if isinstance(specs, dict):
+            for spec_key in specs:
+                all_specs.add(spec_key)
     
-    # Сортируем: сначала приоритетные, затем остальные
     sorted_specs = [s for s in priority_specs if s in all_specs]
     sorted_specs += sorted([s for s in all_specs if s not in priority_specs])
     
-    # Формируем HTML таблицу
     html = '<div style="overflow-x: auto; max-width: 100%;">'
     html += '<table style="width: 100%; border-collapse: collapse; font-size: 13px; background: white; border-radius: 12px; overflow: hidden;">'
     
-    # Заголовок таблицы
     html += '<thead><tr style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white;">'
     html += '<th style="padding: 12px; border: 1px solid rgba(255,255,255,0.2); text-align: left;">📊 Характеристика</th>'
     for p in products:
@@ -340,20 +357,18 @@ def format_compare_response(products, with_recommendation=True):
         html += f'</th>'
     html += '     </tr></thead><tbody>'
     
-    # Цена
     html += '<tr style="background: #f8f9fa;">'
     html += '<td style="padding: 10px; border: 1px solid #ddd; font-weight: bold;">💰 Цена</td>'
     for p in products:
         html += f'<td style="padding: 10px; border: 1px solid #ddd; text-align: center;"><span style="color: #28a745; font-weight: bold;">{p["price"]}</span></td>'
     html += '</tr>'
     
-    # Рейтинг
     if any(p.get('rating', 0) > 0 for p in products):
         html += '<tr>'
         html += '<td style="padding: 10px; border: 1px solid #ddd; font-weight: bold;">⭐ Рейтинг</td>'
         for p in products:
             stars = ''
-            rating = p.get('rating', 0)
+            rating = safe_float(p.get('rating'))
             full = int(rating)
             half = 1 if rating - full >= 0.5 else 0
             empty = 5 - full - half
@@ -361,30 +376,28 @@ def format_compare_response(products, with_recommendation=True):
             html += f'<td style="padding: 10px; border: 1px solid #ddd; text-align: center;">{stars}<br><small>{rating}</small></td>'
         html += '</tr>'
     
-    # Наличие
     html += '<tr style="background: #f8f9fa;">'
     html += '<td style="padding: 10px; border: 1px solid #ddd; font-weight: bold;">📦 Наличие</td>'
     for p in products:
-        stock = p.get('stock', 0)
+        stock = safe_int(p.get('stock'))
         stock_text = f'✅ {stock} шт.' if stock > 0 else '❌ Нет в наличии'
         stock_color = '#28a745' if stock > 0 else '#dc3545'
         html += f'<td style="padding: 10px; border: 1px solid #ddd; text-align: center; color: {stock_color};">{stock_text}</td>'
     html += '</tr>'
     
-    # Продажи
     html += '<tr>'
     html += '<td style="padding: 10px; border: 1px solid #ddd; font-weight: bold;">📈 Продано</td>'
     for p in products:
-        html += f'<td style="padding: 10px; border: 1px solid #ddd; text-align: center;">{p.get("sales_count", 0)} шт.</td>'
+        html += f'<td style="padding: 10px; border: 1px solid #ddd; text-align: center;">{safe_int(p.get("sales_count"))} шт.</td>'
     html += '</tr>'
     
-    # Характеристики из БД
     for spec_key in sorted_specs:
         spec_name = ''
         for p in products:
-            if spec_key in p.get('specs', {}):
-                if isinstance(p['specs'][spec_key], dict):
-                    spec_name = p['specs'][spec_key].get('name', spec_key)
+            specs = p.get('specs', {})
+            if isinstance(specs, dict) and spec_key in specs:
+                if isinstance(specs[spec_key], dict):
+                    spec_name = specs[spec_key].get('name', spec_key)
                 else:
                     spec_name = spec_key.replace('nb_', '').replace('sm_', '').replace('hp_', '').replace('ch_', '').replace('gl_', '')
                     spec_name = spec_name.replace('_', ' ').title()
@@ -396,7 +409,11 @@ def format_compare_response(products, with_recommendation=True):
         html += '<tr style="background: #f8f9fa;">'
         html += f'<td style="padding: 10px; border: 1px solid #ddd; font-weight: bold;">📌 {spec_name}</td>'
         for p in products:
-            value = p.get('specs', {}).get(spec_key, '—')
+            specs = p.get('specs', {})
+            if isinstance(specs, dict):
+                value = specs.get(spec_key, '—')
+            else:
+                value = '—'
             if isinstance(value, dict):
                 value = value.get('value', '—')
             html += f'<td style="padding: 10px; border: 1px solid #ddd; text-align: center;">{value}</td>'
@@ -404,29 +421,49 @@ def format_compare_response(products, with_recommendation=True):
     
     html += '</tbody></table></div>'
     
-    # Добавляем совет эксперта
     if with_recommendation:
         recommendation_html = generate_recommendation(products)
         html += recommendation_html
     
-    # Добавляем кнопку для перехода к полному сравнению
     ids = [p['id'] for p in products]
     compare_url = f"/mobileshop/pages/compare.php?ids={','.join(map(str, ids))}"
-    html += f'<br><div style="text-align: center;"><a href="{compare_url}" target="_blank" style="display: inline-block; padding: 10px 20px; background: #667eea; color: white; text-decoration: none; border-radius: 8px; font-weight: bold;">📊 Открыть полное сравнение на сайте</a></div>'
+    export_url = f"/api/export-compare?ids={','.join(map(str, ids))}"
+    
+    html += f'''
+    <div style="margin-top: 15px; text-align: center; display: flex; gap: 10px; justify-content: center; flex-wrap: wrap;">
+        <a href="{export_url}" target="_blank" 
+           style="display: inline-block; padding: 10px 20px; background: #28a745; color: white; 
+                  text-decoration: none; border-radius: 8px; font-weight: bold;">
+            📥 Скачать Excel
+        </a>
+        <a href="{compare_url}" target="_blank"
+           style="display: inline-block; padding: 10px 20px; background: #667eea; color: white; 
+                  text-decoration: none; border-radius: 8px; font-weight: bold;">
+            🔗 Открыть на сайте
+        </a>
+    </div>
+    '''
     
     return html
 
 
-# 🌟 СИСТЕМНЫЙ ПРОМТ
-SYSTEM_PROMPT = """Ты — профессиональный и дружелюбный консультант интернет-магазина техники. Твоя специализация — помощь покупателям в выборе товаров и их сравнении.
+# 🌟 СИСТЕМНЫЙ ПРОМТ — УСИЛЕННЫЙ ЧТОБЫ ИЗБЕЖАТЬ JSON-ОТВЕТОВ
+SYSTEM_PROMPT = """Ты — профессиональный консультант интернет-магазина техники. 
 
-Ты имеешь доступ к реальному каталогу товаров магазина. Ты можешь:
-1. Искать товары по названию, бренду
-2. Сравнивать товары по характеристикам из базы данных
-3. Рекомендовать товары под бюджет и потребности
-4. Давать честные советы какой товар лучше купить
+ВАЖНЫЕ ПРАВИЛА:
+1. Отвечай ТОЛЬКО простым текстом на русском языке
+2. НИКОГДА не используй JSON, XML, markdown-код или структурированные форматы
+3. НИКОГДА не пиши {"tool": ...} или похожие технические конструкции
+4. Отвечай как человек: коротко, дружелюбно, по делу
+5. Если не знаешь ответ — честно скажи об этом
 
-Всегда будь полезным и помогай пользователю сделать правильный выбор!"""
+Ты можешь:
+- Искать товары по названию и бренду
+- Сравнивать товары по характеристикам
+- Рекомендовать товары под бюджет
+- Давать советы по выбору
+
+Всегда будь полезным и помогай сделать правильный выбор!"""
 
 
 def get_openrouter_response(messages, session_id=None):
@@ -481,7 +518,14 @@ def get_openrouter_response(messages, session_id=None):
         if response.status_code == 200:
             result = response.json()
             if 'choices' in result and len(result['choices']) > 0:
-                return result['choices'][0]['message']['content'], None
+                content = result['choices'][0]['message']['content']
+                
+                # ЗАЩИТА: если AI вернул JSON — заменяем на человеческий ответ
+                if content.strip().startswith('{') and '"tool"' in content:
+                    logger.warning("⚠️ AI вернул JSON, заменяем на заглушку")
+                    return "Извините, я не совсем понял вопрос. Можете переформулировать? Я могу помочь с поиском товаров, сравнением или подбором по бюджету.", None
+                
+                return content, None
             else:
                 return None, "Неожиданный формат ответа от API"
         else:
@@ -513,17 +557,17 @@ def save_compare_products():
         products = data.get('products', [])
         
         if products and len(products) >= 2:
-            # Получаем детальные характеристики товаров из БД
             product_ids = [p['id'] for p in products]
             detailed_products = get_products_for_compare(product_ids)
             
             if detailed_products and len(detailed_products) >= 2:
                 last_compared_products[session_id] = detailed_products
+                save_chat_session(session_id, conversations.get(session_id, []), detailed_products)
                 logger.info(f"💾 СОХРАНЕНИЕ из мини-панели для сессии {session_id}: {len(detailed_products)} товаров")
                 return jsonify({'status': 'success', 'message': 'Товары сохранены'})
             else:
-                # Если не удалось получить детали, сохраняем базовую информацию
                 last_compared_products[session_id] = products
+                save_chat_session(session_id, conversations.get(session_id, []), products)
                 logger.info(f"💾 СОХРАНЕНИЕ (базовое) для сессии {session_id}: {len(products)} товаров")
                 return jsonify({'status': 'success', 'message': 'Товары сохранены (базовая информация)'})
         else:
@@ -534,6 +578,211 @@ def save_compare_products():
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
 
+@app.route('/api/wizard', methods=['POST'])
+def wizard_step():
+    """Многошаговый мастер подбора товаров"""
+    try:
+        data = request.json
+        session_id = data.get('session_id', request.remote_addr)
+        step = data.get('step')
+        user_choice = data.get('choice')
+        
+        wizard_key = f"wizard_{session_id}"
+        
+        if step == 'start':
+            return jsonify({
+                'step': 'category',
+                'message': '🎯 <b>Мастер подбора товаров</b><br><br>Выберите категорию:',
+                'options': [
+                    {'id': 'smartfony', 'name': '📱 Смартфоны'},
+                    {'id': 'notebooks', 'name': '💻 Ноутбуки'},
+                    {'id': 'naushniki', 'name': '🎧 Наушники'},
+                    {'id': 'aksessuary', 'name': '🔌 Аксессуары'}
+                ],
+                'type': 'single_select'
+            })
+        
+        elif step == 'category':
+            last_compared_products[wizard_key] = {'category': user_choice}
+            
+            return jsonify({
+                'step': 'budget',
+                'message': f'✅ Категория: <b>{user_choice}</b><br><br>💰 Какой у вас бюджет?',
+                'options': [
+                    {'id': '20000', 'name': 'До 20 000 ₽'},
+                    {'id': '40000', 'name': '20 000 - 40 000 ₽'},
+                    {'id': '60000', 'name': '40 000 - 60 000 ₽'},
+                    {'id': '100000', 'name': '60 000 - 100 000 ₽'},
+                    {'id': 'unlimited', 'name': 'Более 100 000 ₽'}
+                ],
+                'type': 'single_select'
+            })
+        
+        elif step == 'budget':
+            state = last_compared_products.get(wizard_key, {})
+            state['budget'] = user_choice
+            last_compared_products[wizard_key] = state
+            
+            category = state['category']
+            
+            if category == 'smartfony':
+                options = [
+                    {'id': 'battery', 'name': '🔋 Батарея (автономность)'},
+                    {'id': 'camera', 'name': '📷 Камера (фото/видео)'},
+                    {'id': 'performance', 'name': '⚡ Производительность (игры/работа)'},
+                    {'id': 'screen', 'name': '📺 Экран (качество)'},
+                    {'id': 'compact', 'name': '🤏 Компактность'},
+                    {'id': 'brand', 'name': '🏷️ Бренд'}
+                ]
+            elif category == 'notebooks':
+                options = [
+                    {'id': 'cpu', 'name': '⚡ Процессор'},
+                    {'id': 'ram', 'name': '💾 Оперативная память'},
+                    {'id': 'ssd', 'name': '💽 Накопитель (SSD)'},
+                    {'id': 'screen', 'name': '📺 Экран'},
+                    {'id': 'battery', 'name': '🔋 Автономность'},
+                    {'id': 'weight', 'name': '🪶 Лёгкость'}
+                ]
+            else:
+                options = [
+                    {'id': 'price', 'name': '💰 Цена'},
+                    {'id': 'quality', 'name': '⭐ Качество'},
+                    {'id': 'brand', 'name': '🏷️ Бренд'}
+                ]
+            
+            return jsonify({
+                'step': 'priorities',
+                'message': '⚙️ <b>Выберите 1-3 главных приоритета</b> (важнее сверху):',
+                'options': options,
+                'type': 'multi_select',
+                'max_select': 3
+            })
+        
+        elif step == 'priorities':
+            state = last_compared_products.get(wizard_key, {})
+            state['priorities'] = user_choice if isinstance(user_choice, list) else [user_choice]
+            
+            category = state['category']
+            budget_map = {
+                '20000': 20000,
+                '40000': 40000,
+                '60000': 60000,
+                '100000': 100000,
+                'unlimited': 999999
+            }
+            budget = budget_map.get(state['budget'], 50000)
+            
+            products = search_products(category.replace('-', ' '))
+            filtered = [p for p in products if safe_float(p.get('price_value', 999999)) <= budget][:3]
+            
+            if len(filtered) >= 2:
+                last_compared_products[session_id] = filtered[:2]
+                save_chat_session(session_id, conversations.get(session_id, []), filtered[:2])
+            
+            if filtered:
+                result_html = f"🎯 <b>Подобрано {len(filtered)} варианта:</b><br><br>"
+                for i, p in enumerate(filtered, 1):
+                    p_url = p.get('url', f"/mobileshop/product.php?id={p['id']}")
+                    result_html += f"""
+                    <div style='border: 1px solid #ddd; border-radius: 8px; padding: 10px; margin: 5px 0;'>
+                        <b>{i}. {p['name']}</b><br>
+                        💰 {p['price']}<br>
+                        ⭐ Рейтинг: {p.get('rating', 'Н/Д')}<br>
+                        🔗 <a href="{p_url}" target="_blank">Подробнее →</a>
+                    </div>
+                    """
+                
+                result_html += "<br>❓ <b>Что дальше?</b>"
+                if len(filtered) >= 2:
+                    result_html += '<br>💡 Напишите "что лучше?" — я сравню первые два товара'
+            else:
+                result_html = "😕 К сожалению, не нашёл товаров по вашим критериям. Попробуйте увеличить бюджет или сменить категорию."
+            
+            if wizard_key in last_compared_products:
+                del last_compared_products[wizard_key]
+            
+            return jsonify({
+                'step': 'result',
+                'message': result_html,
+                'products': filtered
+            })
+        
+        return jsonify({'error': 'Неизвестный шаг'}), 400
+        
+    except Exception as e:
+        logger.error(f"❌ Ошибка мастера: {str(e)}")
+        return jsonify({'error': 'Ошибка сервера'}), 500
+
+
+@app.route('/api/export-compare')
+def export_compare():
+    """Экспорт сравнения товаров в CSV"""
+    try:
+        ids = request.args.get('ids', '').split(',')
+        ids = [int(id) for id in ids if id.strip().isdigit()]
+        
+        if len(ids) < 2:
+            return jsonify({'error': 'Нужно минимум 2 товара'}), 400
+        
+        products = get_products_for_compare(ids)
+        if not products or len(products) < 2:
+            return jsonify({'error': 'Не удалось загрузить товары'}), 400
+        
+        output = io.StringIO()
+        writer = csv.writer(output, delimiter=';', lineterminator='\n')
+        
+        headers = ['Характеристика'] + [p.get('name', f'Товар {i+1}')[:40] for i, p in enumerate(products)]
+        writer.writerow(headers)
+        
+        rows = [
+            ['Цена'] + [p.get('price', '—') for p in products],
+            ['Рейтинг'] + [str(p.get('rating', '—')) for p in products],
+            ['Наличие'] + [str(safe_int(p.get('stock'))) + ' шт.' for p in products],
+            ['Продано'] + [str(safe_int(p.get('sales_count'))) for p in products],
+        ]
+        
+        all_specs = set()
+        for p in products:
+            specs = p.get('specs', {})
+            if isinstance(specs, dict):
+                all_specs.update(specs.keys())
+        
+        for spec in sorted(all_specs):
+            row = [spec.replace('nb_', '').replace('sm_', '').replace('_', ' ').title()]
+            for p in products:
+                specs = p.get('specs', {}) if isinstance(p.get('specs'), dict) else {}
+                val = specs.get(spec, '—')
+                if isinstance(val, dict):
+                    val = val.get('value', '—')
+                row.append(str(val))
+            rows.append(row)
+        
+        for row in rows:
+            writer.writerow(row)
+        
+        writer.writerow([])
+        writer.writerow(['РЕКОМЕНДАЦИЯ'])
+        rec = generate_recommendation(products)
+        rec_text = re.sub(r'<[^>]+>', ' ', rec).replace('&nbsp;', ' ').strip()
+        writer.writerow([rec_text])
+        
+        output.seek(0)
+        
+        bom = '\ufeff'
+        final_output = io.BytesIO((bom + output.getvalue()).encode('utf-8-sig'))
+        
+        return send_file(
+            final_output,
+            mimetype='text/csv',
+            as_attachment=True,
+            download_name=f'compare_{datetime.now().strftime("%Y%m%d_%H%M")}.csv'
+        )
+        
+    except Exception as e:
+        logger.error(f"❌ Ошибка экспорта: {str(e)}")
+        return jsonify({'error': 'Ошибка при создании файла'}), 500
+
+
 @app.route('/api/chat', methods=['POST'])
 def chat():
     """API endpoint для чат-бота"""
@@ -542,21 +791,23 @@ def chat():
         user_message = data.get('message', '').strip()
         session_id = data.get('session_id', request.remote_addr)
         
-        # Логируем session_id для отладки
-        logger.info(f"💬 Сессия: {session_id}, Сообщение: {user_message[:50]}...")
+        logger.info(f"💬 [CHAT] session_id={session_id[:20] if session_id else 'NONE'}...")
         
-        # ========== ОТЛАДКА ==========
-        logger.info(f"🔍 Содержимое last_compared_products: {last_compared_products}")
-        logger.info(f"🔍 Текущая сессия в last_compared_products: {session_id in last_compared_products}")
-        if session_id in last_compared_products:
-            logger.info(f"🔍 Сохраненные товары: {last_compared_products[session_id][0]['name']} vs {last_compared_products[session_id][1]['name']}")
-        # ==========================
+        # ========== ЗАГРУЗКА ИЗ MYSQL ==========
+        if session_id not in conversations:
+            history, products = load_chat_session(session_id)
+            if history is not None:
+                conversations[session_id] = history
+                logger.info(f"📥 История загружена: {len(history)} сообщений")
+            if products:
+                last_compared_products[session_id] = products
+                logger.info(f"📥 Товары загружены: {len(products)} шт.")
+        # ======================================
         
         if not user_message:
             return jsonify({'response': 'Пожалуйста, введите ваш вопрос.'})
         
-        # ========== ОБРАБОТКА ЗАПРОСА "ЧТО ЛУЧШЕ?" (без указания товаров) ==========
-        # Проверяем разные варианты запроса
+        # ========== ОБРАБОТКА ЗАПРОСА "ЧТО ЛУЧШЕ?" ==========
         user_message_lower = user_message.lower().strip()
         is_recommend_request = user_message_lower in [
             'что лучше', 'что лучше?', 'какой лучше', 'какой лучше?', 
@@ -570,17 +821,10 @@ def chat():
             if session_id in last_compared_products and last_compared_products[session_id]:
                 products = last_compared_products[session_id]
                 if len(products) >= 2:
-                    logger.info(f"💡 Генерирую совет по товарам: {products[0]['name']} vs {products[1]['name']}")
+                    logger.info(f"💡 Генерирую совет: {products[0].get('name', 'N/A')} vs {products[1].get('name', 'N/A')}")
                     
-                    # Проверяем, есть ли у товаров детальные характеристики
-                    if len(products) >= 2 and 'specs' in products[0]:
-                        # Используем детальный анализ
-                        recommendation = generate_recommendation(products)
-                    else:
-                        # Используем простой анализ
-                        recommendation = generate_simple_recommendation(products)
+                    recommendation = generate_recommendation(products)
                     
-                    # Добавляем кнопку для повторного сравнения
                     ids = [p['id'] for p in products]
                     compare_url = f"/mobileshop/pages/compare.php?ids={','.join(map(str, ids))}"
                     recommendation += f'<br><br><div style="text-align: center;"><a href="{compare_url}" target="_blank" style="display: inline-block; padding: 8px 15px; background: #667eea; color: white; text-decoration: none; border-radius: 5px;">🔄 Показать полное сравнение</a></div>'
@@ -612,20 +856,16 @@ def chat():
                     p1 = products1[0]
                     p2 = products2[0]
                     
-                    # Получаем детальные характеристики из БД
                     products = get_products_for_compare([p1['id'], p2['id']])
                     
                     if products and len(products) >= 2:
-                        # Сохраняем последние сравненные товары для этой сессии
                         last_compared_products[session_id] = products
-                        logger.info(f"💾 СОХРАНЕНИЕ: Товары для сессии {session_id}: {products[0]['name']} vs {products[1]['name']}")
-                        logger.info(f"💾 Всего сохранено: {len(last_compared_products)} сессий")
+                        save_chat_session(session_id, conversations.get(session_id, []), products)
+                        logger.info(f"💾 СОХРАНЕНИЕ: {products[0].get('name', 'N/A')} vs {products[1].get('name', 'N/A')}")
                         
-                        # Формируем ответ с таблицей и советом
                         response_text = format_compare_response(products, with_recommendation=True)
                         return jsonify({'response': response_text, 'status': 'success'})
                     else:
-                        # Если не удалось получить детали, показываем простую ссылку
                         p1_url = f"/mobileshop/product.php?id={p1['id']}"
                         p2_url = f"/mobileshop/product.php?id={p2['id']}"
                         response_text = f"""🔍 **Найденные товары для сравнения:**
@@ -653,7 +893,7 @@ def chat():
             products = search_products(category)
             
             if products:
-                filtered = [p for p in products if p.get('price_value', 0) <= budget][:3]
+                filtered = [p for p in products if safe_float(p.get('price_value', 0)) <= budget][:3]
                 
                 if filtered:
                     response_text = f"💰 **Подбор {category} до {budget} ₽:**<br><br>"
@@ -691,6 +931,10 @@ def chat():
         if len(conversations[session_id]) > 20:
             conversations[session_id] = conversations[session_id][-20:]
         
+        # ========== СОХРАНЕНИЕ В MYSQL ==========
+        save_chat_session(session_id, conversations[session_id], last_compared_products.get(session_id))
+        # ======================================
+        
         return jsonify({
             'response': bot_response,
             'session_id': session_id,
@@ -709,13 +953,27 @@ def clear_history():
         data = request.json
         session_id = data.get('session_id', request.remote_addr)
         
+        logger.info(f"🗑️ Очистка истории для: {session_id[:20] if session_id else 'NONE'}...")
+        
         if session_id in conversations:
             conversations[session_id] = []
-            logger.info(f"🗑️ История очищена для {session_id}")
+            logger.info(f"🗑️ История очищена в памяти")
         
         if session_id in last_compared_products:
             del last_compared_products[session_id]
-            logger.info(f"🗑️ Удалены сохраненные товары для сессии {session_id}")
+            logger.info(f"🗑️ Товары удалены из памяти")
+        
+        conn = get_db_connection()
+        if conn:
+            try:
+                cursor = conn.cursor()
+                cursor.execute("DELETE FROM chat_sessions WHERE session_id = %s", (session_id,))
+                conn.commit()
+                logger.info(f"🗑️ Запись удалена из БД")
+            finally:
+                if conn.is_connected():
+                    cursor.close()
+                    conn.close()
         
         return jsonify({'status': 'success'})
         
@@ -748,6 +1006,35 @@ def test_api_key():
         })
 
 
+@app.route('/api/chat-history', methods=['GET'])
+def get_chat_history():
+    """Возвращает историю сообщений для сессии"""
+    session_id = request.args.get('session_id')
+    logger.info(f"📜 Запрос истории для: {session_id[:20] if session_id else 'NONE'}...")
+
+    if not session_id:
+        logger.warning("❌ session_id не передан")
+        return jsonify({'error': 'session_id required'}), 400
+
+    # Загружаем из MySQL
+    messages, products = load_chat_session(session_id)
+
+    if messages is None:
+        logger.info(f"📭 История не найдена в БД")
+        return jsonify({'messages': []})
+
+    # Фильтруем system-сообщения
+    filtered = [m for m in messages if m.get('role') != 'system']
+
+    logger.info(f"📜 Найдено {len(filtered)} сообщений")
+
+    return jsonify({
+        'messages': filtered,
+        'last_products': products,
+        'session_id': session_id[:20] + '...'
+    })
+
+
 if __name__ == '__main__':
     print("=" * 60)
     print("🛍️  ЗАПУСК КОНСУЛЬТАНТА ИНТЕРНЕТ-МАГАЗИНА")
@@ -757,9 +1044,12 @@ if __name__ == '__main__':
     if OPENROUTER_API_KEY:
         print(f"   Preview: {OPENROUTER_API_KEY[:10]}...")
     print(f"🤖 Модель: {OPENROUTER_MODEL}")
+    print(f"🗄️  База данных: MySQL ({DB_CONFIG['database']})")
     print("-" * 60)
     print("🌐 API endpoint: http://localhost:5000/api/chat")
     print("🔑 Тест API: http://localhost:5000/api/test-key")
+    print("🎯 Мастер подбора: POST /api/wizard")
+    print("📥 Экспорт: GET /api/export-compare?ids=1,2")
     print("=" * 60)
     
     app.run(debug=True, host='0.0.0.0', port=5000)
