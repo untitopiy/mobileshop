@@ -160,19 +160,25 @@ function updateCompareCount() {
     }
 }
 
-// Загрузка статуса сравнения для всех товаров на странице
 function loadCompareStatus() {
     compareIds.forEach(function(productId) {
-        var compareIcon = document.getElementById('compare-icon-' + productId);
-        if (compareIcon) {
+        // Обновляем все иконки сравнения для этого товара
+        var allCompareIcons = document.querySelectorAll('[id^="compare-icon-' + productId + '"], [id^="compare-icon-bs-' + productId + '"]');
+        allCompareIcons.forEach(function(compareIcon) {
             compareIcon.style.color = '#ffc107';
             compareIcon.classList.add('active');
-        }
+        });
+        
+        // Обновляем класс active у всех кнопок
+        var allCompareBtns = document.querySelectorAll('[onclick*="toggleAction(\'compare\', ' + productId + '"]');
+        allCompareBtns.forEach(function(btn) {
+            btn.classList.add('active');
+        });
     });
 }
 
 // Функция добавления/удаления из сравнения
-function toggleCompare(productId) {
+function toggleCompare(productId, btnElement) {
     fetch(window.BASE_URL + 'pages/update_compare.php', {
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -186,16 +192,27 @@ function toggleCompare(productId) {
             updateCompareCount();
             showToast(data.message, data.action === 'added' ? 'success' : 'info');
             
-            var compareIcon = document.getElementById('compare-icon-' + productId);
-            if (compareIcon) {
+            // Обновляем ВСЕ иконки сравнения для этого товара (в каталоге и в хитах)
+            var allCompareIcons = document.querySelectorAll('[id^="compare-icon-' + productId + '"], [id^="compare-icon-bs-' + productId + '"]');
+            allCompareIcons.forEach(function(icon) {
                 if (data.action === 'added') {
-                    compareIcon.style.color = '#ffc107';
-                    compareIcon.classList.add('active');
+                    icon.style.color = '#ffc107';
+                    icon.classList.add('active');
                 } else {
-                    compareIcon.style.color = '';
-                    compareIcon.classList.remove('active');
+                    icon.style.color = '';
+                    icon.classList.remove('active');
                 }
-            }
+            });
+            
+            // Обновляем класс active у кнопок
+            var allCompareBtns = document.querySelectorAll('[onclick*="toggleAction(\'compare\', ' + productId + '"]');
+            allCompareBtns.forEach(function(btn) {
+                if (data.action === 'added') {
+                    btn.classList.add('active');
+                } else {
+                    btn.classList.remove('active');
+                }
+            });
         } else {
             showToast(data.message || 'Ошибка', 'error');
         }
@@ -309,19 +326,26 @@ function loadWishlistStatus() {
         .then(function(data) {
             if (data.success && data.wishlist) {
                 data.wishlist.forEach(function(productId) {
-                    var icon = document.getElementById('wishlist-icon-' + productId);
-                    if (icon) {
+                    // Обновляем все иконки избранного для этого товара
+                    var allIcons = document.querySelectorAll('[id^="wishlist-icon-' + productId + '"], [id^="wishlist-icon-bs-' + productId + '"]');
+                    allIcons.forEach(function(icon) {
                         icon.classList.remove('far');
                         icon.classList.add('fas');
                         icon.style.color = '#dc3545';
-                    }
+                    });
+                    
+                    // Обновляем класс active у всех кнопок
+                    var allBtns = document.querySelectorAll('[onclick*="toggleAction(\'wishlist\', ' + productId + '"]');
+                    allBtns.forEach(function(btn) {
+                        btn.classList.add('active');
+                    });
                 });
             }
         })
         .catch(function(error) { console.error('Error:', error); });
 }
 
-function toggleWishlist(productId) {
+function toggleWishlist(productId, btnElement) {
     fetch(window.BASE_URL + 'pages/wishlist.php?check_auth=1')
         .then(function(response) { return response.json(); })
         .then(function(data) {
@@ -341,8 +365,9 @@ function toggleWishlist(productId) {
             .then(function(response) { return response.json(); })
             .then(function(data) {
                 if (data.success) {
-                    var icon = document.getElementById('wishlist-icon-' + productId);
-                    if (icon) {
+                    // Обновляем ВСЕ иконки избранного для этого товара
+                    var allIcons = document.querySelectorAll('[id^="wishlist-icon-' + productId + '"], [id^="wishlist-icon-bs-' + productId + '"]');
+                    allIcons.forEach(function(icon) {
                         if (data.action === 'added') {
                             icon.classList.remove('far');
                             icon.classList.add('fas');
@@ -352,7 +377,18 @@ function toggleWishlist(productId) {
                             icon.classList.add('far');
                             icon.style.color = '';
                         }
-                    }
+                    });
+                    
+                    // Обновляем класс active у всех кнопок
+                    var allBtns = document.querySelectorAll('[onclick*="toggleAction(\'wishlist\', ' + productId + '"]');
+                    allBtns.forEach(function(btn) {
+                        if (data.action === 'added') {
+                            btn.classList.add('active');
+                        } else {
+                            btn.classList.remove('active');
+                        }
+                    });
+                    
                     showToast(data.message, 'success');
                     updateWishlistCount();
                 }
@@ -495,14 +531,13 @@ function showToast(message, type) {
 
 // ========== ОБЩАЯ ФУНКЦИЯ ДЛЯ ДЕЙСТВИЙ ==========
 
-function toggleAction(type, productId) {
+function toggleAction(type, productId, btnElement) {
     if (type === 'wishlist') {
-        toggleWishlist(productId);
+        toggleWishlist(productId, btnElement);
     } else if (type === 'compare') {
-        toggleCompare(productId);
+        toggleCompare(productId, btnElement);
     }
 }
-
 // ========== ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ==========
 
 function debounce(func, wait) {
