@@ -508,7 +508,8 @@ if (empty($recommended_for_you)) {
     </div>
 </main>
 <?php if (!empty($recommended_for_you)): ?>
-<section class="rfy-section py-5">
+<section class="rfy-section py-5" id="rfy-section">
+    <canvas id="rfy-particles"></canvas>
     <div class="container">
         <div class="rfy-header mb-4">
             <div class="rfy-icon-wrap">
@@ -572,7 +573,8 @@ if (empty($recommended_for_you)) {
         <div class="container">
             <h2 class="text-center mb-4">Хиты продаж</h2>
             <div class="row">
-                <?php foreach ($bestsellers as $item): 
+                <?php 
+                foreach ($bestsellers as $item): 
                     $bs_var = $first_variations[$item['id']] ?? null;
                     $bs_stock = ($bs_var['quantity'] ?? 0) > 0 || $item['total_stock'] > 0;
                     $bs_var_id = $bs_var['variation_id'] ?? null;
@@ -585,11 +587,13 @@ if (empty($recommended_for_you)) {
                                      alt="<?= htmlspecialchars($item['name']); ?>" 
                                      class="product-image">
                                 <div class="card-actions position-absolute top-0 start-0 m-2">
-                                    <button class="action-btn" onclick="event.stopPropagation(); toggleAction('wishlist', <?= $item['id']; ?>)">
-                                        <i class="far fa-heart" id="wishlist-icon-<?= $item['id']; ?>"></i>
+                                    <button class="action-btn" 
+                                            onclick="event.stopPropagation(); toggleAction('wishlist', <?= $item['id']; ?>, this)">
+                                        <i class="far fa-heart" id="wishlist-icon-bs-<?= $item['id']; ?>"></i>
                                     </button>
-                                    <button class="action-btn" onclick="event.stopPropagation(); toggleAction('compare', <?= $item['id']; ?>)">
-                                        <i class="fas fa-balance-scale" id="compare-icon-<?= $item['id']; ?>"></i>
+                                    <button class="action-btn" 
+                                            onclick="event.stopPropagation(); toggleAction('compare', <?= $item['id']; ?>, this)">
+                                        <i class="fas fa-balance-scale" id="compare-icon-bs-<?= $item['id']; ?>"></i>
                                     </button>
                                 </div>
                             </div>
@@ -691,6 +695,159 @@ if (empty($recommended_for_you)) {
 
 <!-- 🔥 ГАРАНТИРОВАННАЯ ИНИЦИАЛИЗАЦИЯ DROPDOWN (только для index.php) -->
 <script>
+
+// ========== ЧАСТИЦЫ ДЛЯ "ВАМ МОЖЕТ ПОНРАВИТЬСЯ" ==========
+(function() {
+    var canvas = document.getElementById('rfy-particles');
+    if (!canvas) return;
+    
+    var ctx = canvas.getContext('2d');
+    var particles = [];
+    var mouse = { x: null, y: null, radius: 120 };
+    var animationId = null;
+    var isVisible = false;
+    
+    function resize() {
+        var section = canvas.parentElement;
+        canvas.width = section.offsetWidth;
+        canvas.height = section.offsetHeight;
+    }
+    
+    function createParticles() {
+        particles = [];
+        var count = Math.min(Math.floor((canvas.width * canvas.height) / 12000), 80);
+        var colors = [
+            'rgba(102, 126, 234,',
+            'rgba(118, 75, 162,',
+            'rgba(255, 193, 7,',
+            'rgba(255, 255, 255,'
+        ];
+        
+        for (var i = 0; i < count; i++) {
+            particles.push({
+                x: Math.random() * canvas.width,
+                y: Math.random() * canvas.height,
+                vx: (Math.random() - 0.5) * 0.8,
+                vy: (Math.random() - 0.5) * 0.8,
+                size: Math.random() * 2.5 + 0.5,
+                color: colors[Math.floor(Math.random() * colors.length)],
+                alpha: Math.random() * 0.5 + 0.2
+            });
+        }
+    }
+    
+    var section = document.getElementById('rfy-section');
+    if (section) {
+        section.addEventListener('mousemove', function(e) {
+            var rect = canvas.getBoundingClientRect();
+            mouse.x = e.clientX - rect.left;
+            mouse.y = e.clientY - rect.top;
+        });
+        section.addEventListener('mouseleave', function() {
+            mouse.x = null;
+            mouse.y = null;
+        });
+    }
+    
+    function drawParticles() {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        
+        for (var i = 0; i < particles.length; i++) {
+            var p = particles[i];
+            p.x += p.vx;
+            p.y += p.vy;
+            if (p.x < 0 || p.x > canvas.width) p.vx *= -1;
+            if (p.y < 0 || p.y > canvas.height) p.vy *= -1;
+            
+            if (mouse.x != null) {
+                var dx = mouse.x - p.x;
+                var dy = mouse.y - p.y;
+                var dist = Math.sqrt(dx * dx + dy * dy);
+                if (dist < mouse.radius) {
+                    var force = (mouse.radius - dist) / mouse.radius;
+                    p.vx += dx * force * 0.05;
+                    p.vy += dy * force * 0.05;
+                }
+            }
+            
+            var speed = Math.sqrt(p.vx * p.vx + p.vy * p.vy);
+            if (speed > 3) {
+                p.vx = (p.vx / speed) * 3;
+                p.vy = (p.vy / speed) * 3;
+            }
+            
+            ctx.beginPath();
+            ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+            ctx.fillStyle = p.color + p.alpha + ')';
+            ctx.fill();
+            ctx.shadowBlur = 10;
+            ctx.shadowColor = p.color + '0.3)';
+        }
+        ctx.shadowBlur = 0;
+        
+        for (var i = 0; i < particles.length; i++) {
+            for (var j = i + 1; j < particles.length; j++) {
+                var dx = particles[i].x - particles[j].x;
+                var dy = particles[i].y - particles[j].y;
+                var dist = Math.sqrt(dx * dx + dy * dy);
+                var maxDist = 100;
+                if (dist < maxDist) {
+                    ctx.beginPath();
+                    ctx.moveTo(particles[i].x, particles[i].y);
+                    ctx.lineTo(particles[j].x, particles[j].y);
+                    var opacity = (1 - dist / maxDist) * 0.15;
+                    ctx.strokeStyle = 'rgba(102, 126, 234, ' + opacity + ')';
+                    ctx.lineWidth = 0.6;
+                    ctx.stroke();
+                }
+            }
+            if (mouse.x != null) {
+                var dx = mouse.x - particles[i].x;
+                var dy = mouse.y - particles[i].y;
+                var dist = Math.sqrt(dx * dx + dy * dy);
+                if (dist < mouse.radius) {
+                    ctx.beginPath();
+                    ctx.moveTo(particles[i].x, particles[i].y);
+                    ctx.lineTo(mouse.x, mouse.y);
+                    var opacity = (1 - dist / mouse.radius) * 0.3;
+                    ctx.strokeStyle = 'rgba(255, 193, 7, ' + opacity + ')';
+                    ctx.lineWidth = 0.8;
+                    ctx.stroke();
+                }
+            }
+        }
+    }
+    
+    function animate() {
+        if (!isVisible) return;
+        drawParticles();
+        animationId = requestAnimationFrame(animate);
+    }
+    
+    var observer = new IntersectionObserver(function(entries) {
+        entries.forEach(function(entry) {
+            isVisible = entry.isIntersecting;
+            if (isVisible && !animationId) {
+                animate();
+            } else if (!isVisible && animationId) {
+                cancelAnimationFrame(animationId);
+                animationId = null;
+            }
+        });
+    }, { threshold: 0.1 });
+    
+    observer.observe(section);
+    
+    resize();
+    createParticles();
+    animate();
+    
+    window.addEventListener('resize', function() {
+        resize();
+        createParticles();
+    });
+})();
+
 (function() {
     'use strict';
     
@@ -740,108 +897,466 @@ if (empty($recommended_for_you)) {
 })();
 </script>
 <style>
-/* ====================================================
-   БЛОК "ВАМ МОЖЕТ ПОНРАВИТЬСЯ" — стили для index.php
-   ==================================================== */
-.rfy-section {
-    background: linear-gradient(135deg, #f8f9ff 0%, #ffffff 100%);
-    border-top: 1px solid #eef0f8;
-    border-bottom: 1px solid #eef0f8;
+/* Начало заднего фона для хитов продаж */
+.bestsellers {
+    background-color: #f8f9fa;
+    background-image: radial-gradient(#dee2e6 1px, transparent 1px);
+    background-size: 20px 20px;
 }
+/* Конец заднего фона */
+
+.action-btn {
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    border: none;
+    background: rgba(255, 255, 255, 0.95);
+    backdrop-filter: blur(4px);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    font-size: 14px;
+    color: #6c757d;
+}
+
+.action-btn:hover {
+    transform: scale(1.15);
+    box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+}
+
+/* Активное состояние избранного — красное сердце */
+.action-btn .fa-heart.fas,
+#wishlist-icon-<?= $item['id'] ?>.fas {
+    color: #dc3545 !important;
+}
+
+/* Активное состояние сравнения — жёлтая иконка */
+.action-btn .fa-balance-scale.active,
+#compare-icon-<?= $item['id'] ?>.active {
+    color: #ffc107 !important;
+}
+
+/* Анимация при клике */
+.action-btn:active {
+    transform: scale(0.9);
+}
+
+.rfy-section {
+    background: linear-gradient(160deg, #f8f9ff 0%, #eef2ff 50%, #ffffff 100%);
+    border-top: 1px solid #e0e4f0;
+    border-bottom: 1px solid #e0e4f0;
+    position: relative;
+    overflow: hidden;
+}
+.rfy-section::before {
+    content: '';
+    position: absolute;
+    top: -50%;
+    right: -10%;
+    width: 400px;
+    height: 400px;
+    background: radial-gradient(circle, rgba(102,126,234,0.06) 0%, transparent 70%);
+    pointer-events: none;
+}
+
 .rfy-header {
     display: flex;
     align-items: center;
-    gap: 16px;
+    gap: 18px;
+    margin-bottom: 28px;
+    position: relative;
+    z-index: 1;
 }
 .rfy-icon-wrap {
-    width: 48px;
-    height: 48px;
-    border-radius: 14px;
+    width: 56px;
+    height: 56px;
+    border-radius: 16px;
     background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
     display: flex;
     align-items: center;
     justify-content: center;
     color: #fff;
-    font-size: 20px;
+    font-size: 22px;
     flex-shrink: 0;
-    box-shadow: 0 4px 12px rgba(102, 126, 234, 0.35);
+    box-shadow: 0 6px 20px rgba(102, 126, 234, 0.4);
+    position: relative;
 }
+.rfy-icon-wrap::after {
+    content: '✨';
+    position: absolute;
+    top: -4px;
+    right: -4px;
+    font-size: 14px;
+    animation: sparkle 2s ease-in-out infinite;
+}
+@keyframes sparkle {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50% { opacity: 0.5; transform: scale(1.2); }
+}
+
 .rfy-title {
-    font-size: 1.4rem;
-    font-weight: 700;
+    font-size: 1.5rem;
+    font-weight: 800;
     margin: 0;
     color: #1a1a2e;
+    letter-spacing: -0.3px;
 }
 .rfy-sub {
-    font-size: 0.83rem;
+    font-size: 0.9rem;
     color: #6c757d;
-    margin: 3px 0 0;
+    margin: 4px 0 0;
+    font-weight: 400;
 }
 
 /* Карточка */
 .rfy-card {
     border: 1px solid #e9ecef;
-    border-radius: 14px;
+    border-radius: 16px;
     background: #fff;
     cursor: pointer;
-    transition: box-shadow 0.22s, transform 0.22s;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
     overflow: hidden;
     position: relative;
     display: flex;
     flex-direction: column;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.04);
+}
+.rfy-card::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 3px;
+    background: linear-gradient(90deg, #667eea, #764ba2);
+    opacity: 0;
+    transition: opacity 0.3s;
 }
 .rfy-card:hover {
-    box-shadow: 0 10px 28px rgba(102, 126, 234, 0.15);
-    transform: translateY(-4px);
+    box-shadow: 0 12px 32px rgba(102, 126, 234, 0.18);
+    transform: translateY(-6px);
 }
+.rfy-card:hover::before {
+    opacity: 1;
+}
+
 .rfy-badge {
     position: absolute;
-    top: 8px;
-    right: 8px;
-    background: #dc3545;
+    top: 10px;
+    right: 10px;
+    background: linear-gradient(135deg, #ff6b6b, #ee5a5a);
     color: #fff;
-    font-size: 0.72rem;
-    font-weight: 700;
-    padding: 2px 7px;
+    font-size: 0.75rem;
+    font-weight: 800;
+    padding: 4px 10px;
     border-radius: 20px;
-    z-index: 1;
+    z-index: 2;
+    box-shadow: 0 2px 8px rgba(238, 90, 90, 0.35);
+    animation: pulse-badge 2s ease-in-out infinite;
 }
+@keyframes pulse-badge {
+    0%, 100% { transform: scale(1); }
+    50% { transform: scale(1.05); }
+}
+
 .rfy-img-wrap {
-    background: #f8f9fa;
-    height: 120px;
+    background: linear-gradient(180deg, #f8f9fa 0%, #f0f2f5 100%);
+    height: 140px;
     display: flex;
     align-items: center;
     justify-content: center;
     overflow: hidden;
+    position: relative;
+}
+.rfy-img-wrap::after {
+    content: '';
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: 40px;
+    background: linear-gradient(transparent, rgba(255,255,255,0.8));
+    pointer-events: none;
 }
 .rfy-img {
-    max-height: 110px;
-    max-width: 100%;
+    max-height: 120px;
+    max-width: 90%;
     object-fit: contain;
-    transition: transform 0.3s;
+    transition: transform 0.4s cubic-bezier(0.4, 0, 0.2, 1);
 }
-.rfy-card:hover .rfy-img { transform: scale(1.07); }
+.rfy-card:hover .rfy-img { 
+    transform: scale(1.1) rotate(-2deg); 
+}
+
 .rfy-body {
-    padding: 10px 12px 12px;
+    padding: 14px 14px 16px;
     flex-grow: 1;
     display: flex;
     flex-direction: column;
-    gap: 4px;
+    gap: 6px;
+    position: relative;
+    z-index: 1;
 }
 .rfy-name {
-    font-size: 0.78rem;
+    font-size: 0.82rem;
     font-weight: 600;
     color: #212529;
-    line-height: 1.3;
+    line-height: 1.35;
     display: -webkit-box;
     -webkit-line-clamp: 2;
     -webkit-box-orient: vertical;
     overflow: hidden;
+    min-height: 2.4em;
 }
-.rfy-price-block { margin-top: auto; }
-.rfy-old-price { font-size: 0.72rem; color: #adb5bd; display: block; }
-.rfy-new-price { font-size: 0.88rem; font-weight: 700; }
-.rfy-rating { font-size: 10px; margin-top: 3px; }
+.rfy-price-block { 
+    margin-top: auto; 
+    padding-top: 6px;
+    border-top: 1px dashed #e9ecef;
+}
+.rfy-old-price { 
+    font-size: 0.75rem; 
+    color: #adb5bd; 
+    display: block;
+    text-decoration: line-through;
+}
+.rfy-new-price { 
+    font-size: 0.95rem; 
+    font-weight: 800; 
+}
+.rfy-new-price.text-danger {
+    background: linear-gradient(135deg, #ff6b6b, #ee5a5a);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+}
+.rfy-rating { 
+    font-size: 10px; 
+    margin-top: 4px; 
+}
+
+/* Кнопка "посмотреть" при наведении */
+.rfy-card .rfy-view-btn {
+    position: absolute;
+    bottom: -40px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: linear-gradient(135deg, #667eea, #764ba2);
+    color: #fff;
+    border: none;
+    padding: 6px 16px;
+    border-radius: 20px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    transition: bottom 0.3s ease;
+    white-space: nowrap;
+    z-index: 3;
+}
+.rfy-card:hover .rfy-view-btn {
+    bottom: 12px;
+}
+
+/* Адаптив */
+@media (max-width: 768px) {
+    .rfy-icon-wrap { width: 44px; height: 44px; font-size: 18px; }
+    .rfy-title { font-size: 1.2rem; }
+    .rfy-img-wrap { height: 110px; }
+    .rfy-card:hover { transform: translateY(-3px); }
+}
+
+/* ====================================================
+   БЛОК "ВАМ МОЖЕТ ПОНРАВИТЬСЯ" + ЧАСТИЦЫ
+   ==================================================== */
+.rfy-section {
+    background: linear-gradient(160deg, #0f0c29 0%, #302b63 50%, #24243e 100%);
+    border-top: 1px solid rgba(102, 126, 234, 0.2);
+    border-bottom: 1px solid rgba(102, 126, 234, 0.2);
+    position: relative;
+    overflow: hidden;
+}
+#rfy-particles {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    z-index: 1;
+    pointer-events: none;
+}
+.rfy-section .container {
+    position: relative;
+    z-index: 2;
+}
+.rfy-header {
+    display: flex;
+    align-items: center;
+    gap: 18px;
+    margin-bottom: 28px;
+    position: relative;
+    z-index: 2;
+}
+.rfy-icon-wrap {
+    width: 56px;
+    height: 56px;
+    border-radius: 16px;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #fff;
+    font-size: 22px;
+    flex-shrink: 0;
+    box-shadow: 0 6px 20px rgba(102, 126, 234, 0.4);
+    position: relative;
+    animation: pulse-glow 3s ease-in-out infinite;
+}
+@keyframes pulse-glow {
+    0%, 100% { box-shadow: 0 6px 20px rgba(102, 126, 234, 0.4); }
+    50% { box-shadow: 0 6px 30px rgba(102, 126, 234, 0.7), 0 0 60px rgba(102, 126, 234, 0.3); }
+}
+.rfy-title {
+    font-size: 1.5rem;
+    font-weight: 800;
+    margin: 0;
+    color: #fff;
+    letter-spacing: -0.3px;
+    text-shadow: 0 2px 10px rgba(102, 126, 234, 0.3);
+}
+.rfy-sub {
+    font-size: 0.9rem;
+    color: #a0a0c0;
+    margin: 4px 0 0;
+    font-weight: 400;
+}
+
+/* Карточка */
+.rfy-card {
+    border: 1px solid rgba(102, 126, 234, 0.15);
+    border-radius: 16px;
+    background: rgba(255, 255, 255, 0.95);
+    backdrop-filter: blur(10px);
+    cursor: pointer;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    overflow: hidden;
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+}
+.rfy-card::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 3px;
+    background: linear-gradient(90deg, #667eea, #764ba2);
+    opacity: 0;
+    transition: opacity 0.3s;
+}
+.rfy-card:hover {
+    box-shadow: 0 12px 32px rgba(102, 126, 234, 0.25);
+    transform: translateY(-6px);
+    border-color: rgba(102, 126, 234, 0.4);
+}
+.rfy-card:hover::before {
+    opacity: 1;
+}
+
+.rfy-badge {
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    background: linear-gradient(135deg, #ff6b6b, #ee5a5a);
+    color: #fff;
+    font-size: 0.75rem;
+    font-weight: 800;
+    padding: 4px 10px;
+    border-radius: 20px;
+    z-index: 2;
+    box-shadow: 0 2px 8px rgba(238, 90, 90, 0.35);
+    animation: pulse-badge 2s ease-in-out infinite;
+}
+@keyframes pulse-badge {
+    0%, 100% { transform: scale(1); }
+    50% { transform: scale(1.05); }
+}
+
+.rfy-img-wrap {
+    background: linear-gradient(180deg, #f8f9fa 0%, #f0f2f5 100%);
+    height: 140px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+    position: relative;
+}
+.rfy-img {
+    max-height: 120px;
+    max-width: 90%;
+    object-fit: contain;
+    transition: transform 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.rfy-card:hover .rfy-img { 
+    transform: scale(1.1) rotate(-2deg); 
+}
+
+.rfy-body {
+    padding: 14px 14px 16px;
+    flex-grow: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    position: relative;
+    z-index: 1;
+}
+.rfy-name {
+    font-size: 0.82rem;
+    font-weight: 600;
+    color: #212529;
+    line-height: 1.35;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    min-height: 2.4em;
+}
+.rfy-price-block { 
+    margin-top: auto; 
+    padding-top: 6px;
+    border-top: 1px dashed #e9ecef;
+}
+.rfy-old-price { 
+    font-size: 0.75rem; 
+    color: #adb5bd; 
+    display: block;
+    text-decoration: line-through;
+}
+.rfy-new-price { 
+    font-size: 0.95rem; 
+    font-weight: 800; 
+}
+.rfy-new-price.text-danger {
+    background: linear-gradient(135deg, #ff6b6b, #ee5a5a);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+}
+.rfy-rating { 
+    font-size: 10px; 
+    margin-top: 4px; 
+}
+
+/* Адаптив */
+@media (max-width: 768px) {
+    .rfy-icon-wrap { width: 44px; height: 44px; font-size: 18px; }
+    .rfy-title { font-size: 1.2rem; }
+    .rfy-img-wrap { height: 110px; }
+    .rfy-card:hover { transform: translateY(-3px); }
+}
+
 </style>
 <?php endif; ?>
 <?php require_once __DIR__ . '/inc/footer.php'; ?>
