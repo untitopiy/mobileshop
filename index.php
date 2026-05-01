@@ -175,6 +175,88 @@ $var_query = $db->query("
 while ($v = $var_query->fetch_assoc()) {
     $first_variations[$v['product_id']] = $v;
 }
+// --- РЕКОМЕНДАЦИИ "ВАМ МОЖЕТ ПОНРАВИТЬСЯ" ---
+$recommended_for_you = [];
+$session_id_idx = session_id();
+$user_id_idx = isset($_SESSION['id']) ? (int)$_SESSION['id'] : null;
+
+if ($user_id_idx) {
+    // Для авторизованных: по истории просмотров (последние 30 дней) + покупок
+    $rfy_query = $db->prepare("
+        SELECT DISTINCT p.id, p.name, p.brand, p.model,
+               COALESCE(MIN(pv_var.price), p.price) as display_price,
+               COALESCE(
+                   (SELECT image_url FROM product_images WHERE product_id = p.id AND is_primary = 1 LIMIT 1),
+                   (SELECT image_url FROM product_images WHERE product_id = p.id LIMIT 1),
+                   'assets/no-image.png'
+               ) AS image_url,
+               CASE WHEN prom_r.discount_type = 'percent' THEN prom_r.discount_value ELSE NULL END as promo_discount,
+               p.rating,
+               p.sales_count,
+               'viewed' as source
+        FROM product_views pvw
+        JOIN products viewed_p ON viewed_p.id = pvw.product_id
+        JOIN products p ON p.category_id = viewed_p.category_id
+            AND p.id != pvw.product_id
+            AND p.status = 'active'
+        LEFT JOIN product_variations pv_var ON pv_var.product_id = p.id
+        LEFT JOIN promotion_products pp_r ON pp_r.product_id = p.id
+        LEFT JOIN promotions prom_r ON prom_r.id = pp_r.promotion_id
+            AND prom_r.is_active = 1
+            AND (prom_r.starts_at <= NOW() OR prom_r.starts_at IS NULL)
+            AND (prom_r.expires_at >= NOW() OR prom_r.expires_at IS NULL)
+        WHERE pvw.user_id = ?
+          AND pvw.viewed_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)
+        GROUP BY p.id
+        ORDER BY p.rating DESC, p.sales_count DESC
+        LIMIT 6
+    ");
+    if (!$rfy_query) {
+        error_log("RFY prepare error: " . $db->error);
+        $recommended_for_you = [];
+    } else {
+        $rfy_query->bind_param('i', $user_id_idx);
+        $rfy_query->execute();
+        $res = $rfy_query->get_result();
+        $recommended_for_you = $res ? $res->fetch_all(MYSQLI_ASSOC) : [];
+    }
+}
+
+// Для гостей / если авторизован, но нет истории — топ по популярности за неделю
+if (empty($recommended_for_you)) {
+    $rfy_fallback = $db->query("
+        SELECT p.id, p.name, p.brand, p.model,
+               COALESCE(MIN(pv_var.price), p.price) as display_price,
+               COALESCE(
+                   (SELECT image_url FROM product_images WHERE product_id = p.id AND is_primary = 1 LIMIT 1),
+                   (SELECT image_url FROM product_images WHERE product_id = p.id LIMIT 1),
+                   'assets/no-image.png'
+               ) AS image_url,
+               CASE WHEN prom_r.discount_type = 'percent' THEN prom_r.discount_value ELSE NULL END as promo_discount,
+               COUNT(pvw.id) as view_count
+        FROM products p
+        LEFT JOIN product_variations pv_var ON pv_var.product_id = p.id
+        LEFT JOIN product_views pvw ON pvw.product_id = p.id
+            AND pvw.viewed_at >= DATE_SUB(NOW(), INTERVAL 7 DAY)
+        LEFT JOIN promotion_products pp_r ON pp_r.product_id = p.id
+        LEFT JOIN promotions prom_r ON prom_r.id = pp_r.promotion_id
+            AND prom_r.is_active = 1
+            AND (prom_r.starts_at <= NOW() OR prom_r.starts_at IS NULL)
+            AND (prom_r.expires_at >= NOW() OR prom_r.expires_at IS NULL)
+        WHERE p.status = 'active'
+        GROUP BY p.id
+        ORDER BY view_count DESC, p.rating DESC
+        LIMIT 6
+    ");
+    if (!$rfy_fallback) {
+        error_log("RFY fallback error: " . $db->error);
+        $recommended_for_you = [];
+    } else {
+        $recommended_for_you = $rfy_fallback->fetch_all(MYSQLI_ASSOC);
+    }
+}
+
+
 ?>
 
 <div class="breadcrumbs-container">
@@ -425,7 +507,66 @@ while ($v = $var_query->fetch_assoc()) {
         </div>
     </div>
 </main>
+<?php if (!empty($recommended_for_you)): ?>
+<section class="rfy-section py-5">
+    <div class="container">
+        <div class="rfy-header mb-4">
+            <div class="rfy-icon-wrap">
+                <i class="fas fa-magic"></i>
+            </div>
+            <div>
+                <h2 class="rfy-title">
+                    <?= $user_id_idx ? 'Вам может понравиться' : 'Популярное сейчас' ?>
+                </h2>
+                <p class="rfy-sub">
+                    <?= $user_id_idx
+                        ? 'Подборка на основе ваших просмотров и покупок'
+                        : 'Самые просматриваемые товары за последнюю неделю' ?>
+                </p>
+            </div>
+        </div>
 
+        <div class="row row-cols-2 row-cols-md-3 row-cols-lg-6 g-3">
+            <?php foreach ($recommended_for_you as $rfy): ?>
+                <?php
+                    $rfy_price  = (float)$rfy['display_price'];
+                    $rfy_disc   = (int)($rfy['promo_discount'] ?? 0);
+                    $rfy_final  = $rfy_disc > 0 ? $rfy_price * (100 - $rfy_disc) / 100 : $rfy_price;
+                    $rfy_img    = htmlspecialchars($rfy['image_url'] ?? 'assets/no-image.png');
+                    $rfy_name   = htmlspecialchars($rfy['brand'] . ' ' . $rfy['name']);
+                ?>
+                <div class="col">
+                    <div class="rfy-card h-100" onclick="location.href='product.php?id=<?= (int)$rfy['id'] ?>'" role="button">
+                        <?php if ($rfy_disc > 0): ?>
+                            <span class="rfy-badge">-<?= $rfy_disc ?>%</span>
+                        <?php endif; ?>
+                        <div class="rfy-img-wrap">
+                            <img src="<?= $rfy_img ?>" alt="<?= $rfy_name ?>" class="rfy-img">
+                        </div>
+                        <div class="rfy-body">
+                            <div class="rfy-name"><?= $rfy_name ?></div>
+                            <div class="rfy-price-block">
+                                <?php if ($rfy_disc > 0): ?>
+                                    <del class="rfy-old-price"><?= number_format($rfy_price, 0, '.', ' ') ?> руб.</del>
+                                    <span class="rfy-new-price text-danger"><?= number_format($rfy_final, 0, '.', ' ') ?> руб.</span>
+                                <?php else: ?>
+                                    <span class="rfy-new-price"><?= number_format($rfy_price, 0, '.', ' ') ?> руб.</span>
+                                <?php endif; ?>
+                            </div>
+                            <?php if (!empty($rfy['rating']) && $rfy['rating'] > 0): ?>
+                                <div class="rfy-rating">
+                                    <?php for($si = 1; $si <= 5; $si++): ?>
+                                        <i class="fas fa-star<?= $si <= round($rfy['rating']) ? '' : ' text-muted' ?>" style="font-size:10px; color:<?= $si <= round($rfy['rating']) ? '#ffc107' : '#ddd' ?>"></i>
+                                    <?php endfor; ?>
+                                </div>
+                            <?php endif; ?>
+                        </div>
+                    </div>
+                </div>
+            <?php endforeach; ?>
+        </div>
+    </div>
+</section>
 <?php if (!empty($bestsellers)): ?>
     <section class="bestsellers py-5 bg-light">
         <div class="container">
@@ -598,5 +739,109 @@ while ($v = $var_query->fetch_assoc()) {
     setTimeout(initAllDropdowns, 500);
 })();
 </script>
+<style>
+/* ====================================================
+   БЛОК "ВАМ МОЖЕТ ПОНРАВИТЬСЯ" — стили для index.php
+   ==================================================== */
+.rfy-section {
+    background: linear-gradient(135deg, #f8f9ff 0%, #ffffff 100%);
+    border-top: 1px solid #eef0f8;
+    border-bottom: 1px solid #eef0f8;
+}
+.rfy-header {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+}
+.rfy-icon-wrap {
+    width: 48px;
+    height: 48px;
+    border-radius: 14px;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #fff;
+    font-size: 20px;
+    flex-shrink: 0;
+    box-shadow: 0 4px 12px rgba(102, 126, 234, 0.35);
+}
+.rfy-title {
+    font-size: 1.4rem;
+    font-weight: 700;
+    margin: 0;
+    color: #1a1a2e;
+}
+.rfy-sub {
+    font-size: 0.83rem;
+    color: #6c757d;
+    margin: 3px 0 0;
+}
 
+/* Карточка */
+.rfy-card {
+    border: 1px solid #e9ecef;
+    border-radius: 14px;
+    background: #fff;
+    cursor: pointer;
+    transition: box-shadow 0.22s, transform 0.22s;
+    overflow: hidden;
+    position: relative;
+    display: flex;
+    flex-direction: column;
+}
+.rfy-card:hover {
+    box-shadow: 0 10px 28px rgba(102, 126, 234, 0.15);
+    transform: translateY(-4px);
+}
+.rfy-badge {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    background: #dc3545;
+    color: #fff;
+    font-size: 0.72rem;
+    font-weight: 700;
+    padding: 2px 7px;
+    border-radius: 20px;
+    z-index: 1;
+}
+.rfy-img-wrap {
+    background: #f8f9fa;
+    height: 120px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+}
+.rfy-img {
+    max-height: 110px;
+    max-width: 100%;
+    object-fit: contain;
+    transition: transform 0.3s;
+}
+.rfy-card:hover .rfy-img { transform: scale(1.07); }
+.rfy-body {
+    padding: 10px 12px 12px;
+    flex-grow: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+.rfy-name {
+    font-size: 0.78rem;
+    font-weight: 600;
+    color: #212529;
+    line-height: 1.3;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+}
+.rfy-price-block { margin-top: auto; }
+.rfy-old-price { font-size: 0.72rem; color: #adb5bd; display: block; }
+.rfy-new-price { font-size: 0.88rem; font-weight: 700; }
+.rfy-rating { font-size: 10px; margin-top: 3px; }
+</style>
+<?php endif; ?>
 <?php require_once __DIR__ . '/inc/footer.php'; ?>

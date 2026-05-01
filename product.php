@@ -157,6 +157,164 @@ if (!$existing_view) {
     $update_views->execute();
 }
 
+// ============================================================
+// БЛОК 1: "Недавно просмотренные" — из сессии/БД, исключая текущий
+// ============================================================
+$recently_viewed = [];
+$rv_query = $db->prepare("
+    SELECT DISTINCT pv.product_id,
+           p.id, p.name, p.brand, p.model, p.price,
+           COALESCE(
+               (SELECT image_url FROM product_images WHERE product_id = p.id AND is_primary = 1 LIMIT 1),
+               (SELECT image_url FROM product_images WHERE product_id = p.id LIMIT 1),
+               'assets/no-image.png'
+           ) AS image_url,
+           COALESCE(MIN(pv2.price), p.price) as display_price,
+           pp2.discount_percent as promo_discount
+    FROM product_views pv
+    JOIN products p ON p.id = pv.product_id
+    LEFT JOIN product_variations pv2 ON pv2.product_id = p.id
+    LEFT JOIN promotion_products pp2 ON pp2.product_id = p.id
+    LEFT JOIN promotions prom2 ON prom2.id = pp2.promotion_id
+        AND prom2.is_active = 1
+        AND (prom2.starts_at <= NOW() OR prom2.starts_at IS NULL)
+        AND (prom2.expires_at >= NOW() OR prom2.expires_at IS NULL)
+    WHERE pv.session_id = ?
+      AND pv.product_id != ?
+      AND p.status = 'active'
+    GROUP BY pv.product_id, p.id, p.name, p.brand, p.model, p.price, image_url, pp2.discount_percent
+    ORDER BY MAX(pv.viewed_at) DESC
+    LIMIT 5
+");
+if (!$rv_query) {
+    error_log("rv_query: " . $db->error);
+    $recently_viewed = [];
+} else {
+    $rv_query->bind_param('si', $session_id, $product_id);
+    $rv_query->execute();
+    $res = $rv_query->get_result();
+    $recently_viewed = $res ? $res->fetch_all(MYSQLI_ASSOC) : [];
+}
+
+// ============================================================
+// БЛОК 2: "Похожие товары" — по категории + рейтингу (из старого product.php + улучшено)
+// ============================================================
+$similar_query = $db->prepare("
+    SELECT p.id, p.name, p.brand, p.model, p.rating,
+           COALESCE(MIN(pv.price), p.price) as display_price,
+           COALESCE(
+               (SELECT image_url FROM product_images WHERE product_id = p.id AND is_primary = 1 LIMIT 1),
+               (SELECT image_url FROM product_images WHERE product_id = p.id LIMIT 1),
+               'assets/no-image.png'
+           ) AS image_url,
+           CASE WHEN prom_p.discount_type = 'percent' THEN prom_p.discount_value ELSE NULL END as promo_discount,
+           COUNT(DISTINCT pvw.id) as view_count
+    FROM products p
+    LEFT JOIN product_variations pv ON pv.product_id = p.id
+    LEFT JOIN promotion_products pp_s ON pp_s.product_id = p.id
+    LEFT JOIN promotions prom_p ON prom_p.id = pp_s.promotion_id
+        AND prom_p.is_active = 1
+        AND (prom_p.starts_at <= NOW() OR prom_p.starts_at IS NULL)
+        AND (prom_p.expires_at >= NOW() OR prom_p.expires_at IS NULL)
+    LEFT JOIN product_views pvw ON pvw.product_id = p.id
+    WHERE p.category_id = ?
+      AND p.id != ?
+      AND p.status = 'active'
+    GROUP BY p.id
+    ORDER BY p.rating DESC, view_count DESC
+    LIMIT 4
+");
+if (!$similar_query) {
+    error_log("similar_query: " . $db->error);
+    $similar_products = [];
+} else {
+    $similar_query->bind_param('ii', $product['category_id'], $product_id);
+    $similar_query->execute();
+    $res = $similar_query->get_result();
+    $similar_products = $res ? $res->fetch_all(MYSQLI_ASSOC) : [];
+}
+
+// Если в той же категории мало товаров — дополняем популярными из других категорий
+if (count($similar_products) < 3) {
+    $needed = 4 - count($similar_products);
+    $existing_ids = array_merge([$product_id], array_column($similar_products, 'id'));
+    $placeholders = implode(',', array_fill(0, count($existing_ids), '?'));
+    $types_str = str_repeat('i', count($existing_ids));
+
+    $fallback_query = $db->prepare("
+        SELECT p.id, p.name, p.brand, p.model, p.rating,
+               COALESCE(MIN(pv.price), p.price) as display_price,
+               COALESCE(
+                   (SELECT image_url FROM product_images WHERE product_id = p.id AND is_primary = 1 LIMIT 1),
+                   (SELECT image_url FROM product_images WHERE product_id = p.id LIMIT 1),
+                   'assets/no-image.png'
+               ) AS image_url,
+               CASE WHEN prom_p.discount_type = 'percent' THEN prom_p.discount_value ELSE NULL END as promo_discount
+        FROM products p
+        LEFT JOIN product_variations pv ON pv.product_id = p.id
+        LEFT JOIN promotion_products pp_s ON pp_s.product_id = p.id
+        LEFT JOIN promotions prom_p ON prom_p.id = pp_s.promotion_id
+            AND prom_p.is_active = 1
+            AND (prom_p.starts_at <= NOW() OR prom_p.starts_at IS NULL)
+            AND (prom_p.expires_at >= NOW() OR prom_p.expires_at IS NULL)
+        WHERE p.id NOT IN ($placeholders)
+          AND p.status = 'active'
+        GROUP BY p.id
+        ORDER BY p.sales_count DESC, p.rating DESC
+        LIMIT ?
+    ");
+    $params = array_merge($existing_ids, [$needed]);
+    $types_str .= 'i';
+    if (!$fallback_query) {
+        error_log("fallback_query: " . $db->error);
+    } else {
+        $fallback_query->bind_param($types_str, ...$params);
+        $fallback_query->execute();
+        $res = $fallback_query->get_result();
+        $fallback = $res ? $res->fetch_all(MYSQLI_ASSOC) : [];
+        $similar_products = array_merge($similar_products, $fallback);
+    }
+}
+
+// ============================================================
+// БЛОК 3: "С этим также покупают" — co-purchase из order_items
+// ============================================================
+$also_bought_query = $db->prepare("
+    SELECT p.id, p.name, p.brand, p.model,
+           COALESCE(MIN(pv.price), p.price) as display_price,
+           COALESCE(
+               (SELECT image_url FROM product_images WHERE product_id = p.id AND is_primary = 1 LIMIT 1),
+               (SELECT image_url FROM product_images WHERE product_id = p.id LIMIT 1),
+               'assets/no-image.png'
+           ) AS image_url,
+           CASE WHEN prom_p.discount_type = 'percent' THEN prom_p.discount_value ELSE NULL END as promo_discount,
+           COUNT(*) as together_count
+    FROM order_items oi_other
+    JOIN order_items oi_main ON oi_main.order_seller_id = oi_other.order_seller_id
+        AND oi_main.product_id = ?
+        AND oi_other.product_id != ?
+    JOIN products p ON p.id = oi_other.product_id
+    LEFT JOIN product_variations pv ON pv.product_id = p.id
+    LEFT JOIN promotion_products pp_ab ON pp_ab.product_id = p.id
+    LEFT JOIN promotions prom_p ON prom_p.id = pp_ab.promotion_id
+        AND prom_p.is_active = 1
+        AND (prom_p.starts_at <= NOW() OR prom_p.starts_at IS NULL)
+        AND (prom_p.expires_at >= NOW() OR prom_p.expires_at IS NULL)
+    WHERE p.status = 'active'
+    GROUP BY p.id
+    ORDER BY together_count DESC
+    LIMIT 4
+");
+if (!$also_bought_query) {
+    error_log("also_bought_query: " . $db->error);
+    $also_bought = [];
+} else {
+    $also_bought_query->bind_param('ii', $product_id, $product_id);
+    $also_bought_query->execute();
+    $res = $also_bought_query->get_result();
+    $also_bought = $res ? $res->fetch_all(MYSQLI_ASSOC) : [];
+}
+
 // Получаем отзывы
 $reviewModel = new Review($db);
 $current_user_id = isset($_SESSION['id']) ? $_SESSION['id'] : null;
@@ -165,6 +323,41 @@ $reviews = $reviewModel->getProductReviews($product_id, $current_user_id);
 $has_reviewed = $current_user_id ? $reviewModel->hasUserReviewed($product_id, $current_user_id) : false;
 
 $has_variations = count($variations) > 1;
+
+// Вспомогательная функция для карточки товара (мини-версия)
+function renderProductCard(array $p, bool $show_promo = true): string {
+    $price = (float)($p['display_price'] ?? $p['price']);
+    $disc  = $show_promo ? (int)($p['promo_discount'] ?? 0) : 0;
+    $final = $disc > 0 ? $price * (100 - $disc) / 100 : $price;
+    $img   = htmlspecialchars($p['image_url'] ?? 'assets/no-image.png');
+    $name  = htmlspecialchars($p['brand'] . ' ' . $p['name']);
+    $id    = (int)$p['id'];
+
+    $price_html = '';
+    if ($disc > 0) {
+        $price_html = '
+            <div class="rec-price">
+                <del class="text-muted small">' . number_format($price, 0, '.', ' ') . ' руб.</del>
+                <span class="text-danger fw-bold">' . number_format($final, 0, '.', ' ') . ' руб.</span>
+                <span class="badge bg-danger ms-1">-' . $disc . '%</span>
+            </div>';
+    } else {
+        $price_html = '<div class="rec-price fw-bold">' . number_format($price, 0, '.', ' ') . ' руб.</div>';
+    }
+
+    return '
+    <div class="col">
+        <div class="rec-card h-100" onclick="location.href=\'product.php?id=' . $id . '\'" role="button" tabindex="0">
+            <div class="rec-img-wrap">
+                <img src="' . $img . '" alt="' . $name . '" class="rec-img">
+            </div>
+            <div class="rec-body">
+                <div class="rec-name">' . $name . '</div>
+                ' . $price_html . '
+            </div>
+        </div>
+    </div>';
+}
 ?>
 
 <div class="container product-container">
@@ -377,8 +570,70 @@ $has_variations = count($variations) > 1;
     </div>
 </div>
 
+<!-- ============================================================ -->
+<!-- РЕК. БЛОК: "С этим также покупают"                          -->
+<!-- ============================================================ -->
+<?php if (!empty($also_bought)): ?>
+<div class="container rec-section mt-5">
+    <div class="rec-section-header">
+        <div class="rec-section-icon"><i class="fas fa-shopping-basket"></i></div>
+        <div>
+            <h2 class="rec-section-title">С этим также покупают</h2>
+            <p class="rec-section-sub">Товары, которые часто берут вместе с этим</p>
+        </div>
+    </div>
+    <div class="row row-cols-2 row-cols-md-4 g-3">
+        <?php foreach ($also_bought as $ab): ?>
+            <?= renderProductCard($ab) ?>
+        <?php endforeach; ?>
+    </div>
+</div>
+<?php endif; ?>
+
+<!-- ============================================================ -->
+<!-- РЕК. БЛОК: "Похожие товары"                                  -->
+<!-- ============================================================ -->
+<?php if (!empty($similar_products)): ?>
+<div class="container rec-section mt-4">
+    <div class="rec-section-header">
+        <div class="rec-section-icon"><i class="fas fa-layer-group"></i></div>
+        <div>
+            <h2 class="rec-section-title">Похожие товары</h2>
+            <p class="rec-section-sub">Другие товары из той же категории</p>
+        </div>
+    </div>
+    <div class="row row-cols-2 row-cols-md-4 g-3">
+        <?php foreach ($similar_products as $sp): ?>
+            <?= renderProductCard($sp) ?>
+        <?php endforeach; ?>
+    </div>
+</div>
+<?php endif; ?>
+
+<!-- ============================================================ -->
+<!-- РЕК. БЛОК: "Недавно просмотренные"                           -->
+<!-- ============================================================ -->
+<?php if (!empty($recently_viewed)): ?>
+<div class="container rec-section mt-4 mb-5">
+    <div class="rec-section-header">
+        <div class="rec-section-icon"><i class="fas fa-history"></i></div>
+        <div>
+            <h2 class="rec-section-title">Недавно просмотренные</h2>
+            <p class="rec-section-sub">Товары, которые вы смотрели ранее</p>
+        </div>
+    </div>
+    <div class="row row-cols-2 row-cols-md-5 g-3">
+        <?php foreach ($recently_viewed as $rv): ?>
+            <?= renderProductCard($rv) ?>
+        <?php endforeach; ?>
+    </div>
+</div>
+<?php endif; ?>
+
 <style>
-/* Общая обертка товара */
+/* ======================================================
+   КАРТОЧКА ТОВАРА — основной блок
+   ====================================================== */
 .product-wrapper {
     background: #ffffff;
     border-radius: 16px;
@@ -394,14 +649,8 @@ $has_variations = count($variations) > 1;
     background: #fafafa;
     transition: transform 0.3s ease;
 }
-.main-image-container:hover {
-    transform: scale(1.02);
-}
-.main-image {
-    width: 100%;
-    max-height: 400px;
-    object-fit: contain;
-}
+.main-image-container:hover { transform: scale(1.02); }
+.main-image { width: 100%; max-height: 400px; object-fit: contain; }
 .thumbnail-gallery {
     display: flex;
     gap: 12px;
@@ -437,7 +686,7 @@ $has_variations = count($variations) > 1;
     width: 100%;
 }
 
-/* Вариации товара */
+/* Вариации */
 .variations-list {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
@@ -448,7 +697,6 @@ $has_variations = count($variations) > 1;
     transition: all 0.2s ease;
     border: 1px solid #dee2e6;
     background: #fff;
-    box-shadow: 0 2px 4px rgba(0,0,0,0.02);
 }
 .variation-item:hover:not(.out-of-stock) {
     border-color: #adb5bd;
@@ -466,26 +714,17 @@ $has_variations = count($variations) > 1;
     background: #f8f9fa;
 }
 
-/* Кнопки действий */
+/* Форма корзины */
 .cart-form {
     padding: 20px 0;
     border-top: 1px dashed #e9ecef;
     border-bottom: 1px dashed #e9ecef;
 }
-.quantity-input {
-    text-align: center;
-    font-weight: bold;
-}
-.product-actions .btn {
-    border-radius: 8px;
-    font-weight: 500;
-    transition: all 0.2s;
-}
+.quantity-input { text-align: center; font-weight: bold; }
+.product-actions .btn { border-radius: 8px; font-weight: 500; transition: all 0.2s; }
 
-/* Стилизация вкладок */
-.product-details .nav-tabs {
-    border-bottom: 2px solid #e9ecef;
-}
+/* Вкладки */
+.product-details .nav-tabs { border-bottom: 2px solid #e9ecef; }
 .product-details .nav-link {
     font-weight: 600;
     color: #6c757d;
@@ -494,10 +733,7 @@ $has_variations = count($variations) > 1;
     padding: 12px 20px;
     margin-bottom: -2px;
 }
-.product-details .nav-link:hover {
-    color: #0d6efd;
-    border-color: transparent;
-}
+.product-details .nav-link:hover { color: #0d6efd; border-color: transparent; }
 .product-details .nav-link.active {
     color: #0d6efd;
     background-color: transparent;
@@ -511,7 +747,7 @@ $has_variations = count($variations) > 1;
     border-top: none;
 }
 
-/* Звезды рейтинга */
+/* Рейтинг */
 .rating-area {
     display: flex !important;
     flex-direction: row-reverse !important;
@@ -519,21 +755,98 @@ $has_variations = count($variations) > 1;
     margin-bottom: 15px;
 }
 .rating-area input { display: none; }
-.rating-area label {
-    font-size: 25px;
-    color: #ddd;
-    cursor: pointer;
-    margin-right: 5px;
-}
+.rating-area label { font-size: 25px; color: #ddd; cursor: pointer; margin-right: 5px; }
 .rating-area label:hover,
 .rating-area label:hover ~ label,
 .rating-area input:checked ~ label { color: #ffc107; }
-.rating-stars {
-    color: #ddd;
+.rating-stars { color: #ddd; }
+.rating-stars .star.filled { color: #ffc107; }
+
+/* ======================================================
+   БЛОКИ РЕКОМЕНДАЦИЙ
+   ====================================================== */
+.rec-section {
+    border-top: 1px solid #f0f0f0;
+    padding-top: 2rem;
 }
-.rating-stars .star.filled {
-    color: #ffc107;
+.rec-section-header {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    margin-bottom: 1.25rem;
 }
+.rec-section-icon {
+    width: 44px;
+    height: 44px;
+    border-radius: 12px;
+    background: linear-gradient(135deg, #0d6efd 0%, #6ea8fe 100%);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #fff;
+    font-size: 18px;
+    flex-shrink: 0;
+}
+.rec-section-title {
+    font-size: 1.3rem;
+    font-weight: 700;
+    margin: 0;
+    color: #1a1a2e;
+}
+.rec-section-sub {
+    font-size: 0.82rem;
+    color: #6c757d;
+    margin: 2px 0 0;
+}
+
+/* Мини-карточка рекомендации */
+.rec-card {
+    border: 1px solid #e9ecef;
+    border-radius: 12px;
+    background: #fff;
+    cursor: pointer;
+    transition: box-shadow 0.2s, transform 0.2s;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+}
+.rec-card:hover {
+    box-shadow: 0 8px 24px rgba(0,0,0,0.10);
+    transform: translateY(-3px);
+}
+.rec-img-wrap {
+    background: #f8f9fa;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 140px;
+    overflow: hidden;
+}
+.rec-img {
+    max-height: 130px;
+    max-width: 100%;
+    object-fit: contain;
+    transition: transform 0.3s;
+}
+.rec-card:hover .rec-img { transform: scale(1.05); }
+.rec-body {
+    padding: 10px 12px 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    flex-grow: 1;
+}
+.rec-name {
+    font-size: 0.82rem;
+    font-weight: 600;
+    color: #212529;
+    line-height: 1.3;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+}
+.rec-price { font-size: 0.88rem; margin-top: auto; }
 </style>
 
 <script>
@@ -584,16 +897,10 @@ function selectVariation(element, variationId, basePrice, stock) {
 
     const formatter = new Intl.NumberFormat('ru-RU');
     
-    if (priceDisplay) {
-        priceDisplay.textContent = formatter.format(Math.round(finalPrice)) + ' руб.';
-    }
-    
-    if (oldPriceDisplay && oldPrice) {
-        oldPriceDisplay.textContent = formatter.format(Math.round(oldPrice)) + ' руб.';
-    }
+    if (priceDisplay) priceDisplay.textContent = formatter.format(Math.round(finalPrice)) + ' руб.';
+    if (oldPriceDisplay && oldPrice) oldPriceDisplay.textContent = formatter.format(Math.round(oldPrice)) + ' руб.';
 }
 
-// Функция добавления в корзину через API
 function addToCartFromProduct() {
     const productId = document.getElementById('product_id').value;
     const variationId = document.getElementById('selected_variation').value;
@@ -621,9 +928,7 @@ function addToCartFromProduct() {
     .then(data => {
         if (data.success) {
             const cartCountEl = document.getElementById('cart-count');
-            if (cartCountEl) {
-                cartCountEl.textContent = data.count;
-            }
+            if (cartCountEl) cartCountEl.textContent = data.count;
             showToast(data.message || 'Товар добавлен в корзину');
         } else {
             showToast(data.message || 'Ошибка при добавлении', 'error');
@@ -635,7 +940,6 @@ function addToCartFromProduct() {
     });
 }
 
-// Функция показа уведомлений
 function showToast(message, type = 'success') {
     let toastContainer = document.getElementById('toast-container');
     if (!toastContainer) {
@@ -667,12 +971,9 @@ function showToast(message, type = 'success') {
     setTimeout(() => toast.remove(), 3000);
 }
 
-// Автоматический выбор первого доступного варианта
 document.addEventListener('DOMContentLoaded', function() {
     const firstAvailable = document.querySelector('.variation-item:not(.out-of-stock)');
-    if (firstAvailable) {
-        firstAvailable.click();
-    }
+    if (firstAvailable) firstAvailable.click();
 });
 </script>
 
