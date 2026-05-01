@@ -337,12 +337,12 @@ function renderProductCard(array $p, bool $show_promo = true): string {
     if ($disc > 0) {
         $price_html = '
             <div class="rec-price">
-                <del class="text-muted small">' . number_format($price, 0, '.', ' ') . ' руб.</del>
-                <span class="text-danger fw-bold">' . number_format($final, 0, '.', ' ') . ' руб.</span>
+                <del class="text-muted small">' . number_format($price, 0, '.', ' ') . ' BYN.</del>
+                <span class="text-danger fw-bold">' . number_format($final, 0, '.', ' ') . ' BYN.</span>
                 <span class="badge bg-danger ms-1">-' . $disc . '%</span>
             </div>';
     } else {
-        $price_html = '<div class="rec-price fw-bold">' . number_format($price, 0, '.', ' ') . ' руб.</div>';
+        $price_html = '<div class="rec-price fw-bold">' . number_format($price, 0, '.', ' ') . ' BYN.</div>';
     }
 
     return '
@@ -439,16 +439,16 @@ function renderProductCard(array $p, bool $show_promo = true): string {
                 <?php if (isset($old_price) && $old_price > $final_price): ?>
                     <div class="d-flex align-items-center gap-2 mb-1">
                         <span class="text-muted text-decoration-line-through fs-5" id="old-price-display">
-                            <?= number_format($old_price, 0, '.', ' ') ?> руб.
+                            <?= number_format($old_price, 0, '.', ' ') ?> BYN.
                         </span>
                         <span class="badge bg-danger">Акция <?= isset($promo_res['name']) ? htmlspecialchars($promo_res['name']) : '' ?></span>
                     </div>
                     <div class="text-danger fw-bold fs-1" id="current-price-display">
-                        <?= number_format($final_price, 0, '.', ' ') ?> руб.
+                        <?= number_format($final_price, 0, '.', ' ') ?> BYN.
                     </div>
                 <?php else: ?>
                     <div class="text-dark fw-bold fs-1" id="current-price-display">
-                        <?= number_format($base_price, 0, '.', ' ') ?> руб.
+                        <?= number_format($base_price, 0, '.', ' ') ?> BYN.
                     </div>
                 <?php endif; ?>
             </div>
@@ -897,8 +897,8 @@ function selectVariation(element, variationId, basePrice, stock) {
 
     const formatter = new Intl.NumberFormat('ru-RU');
     
-    if (priceDisplay) priceDisplay.textContent = formatter.format(Math.round(finalPrice)) + ' руб.';
-    if (oldPriceDisplay && oldPrice) oldPriceDisplay.textContent = formatter.format(Math.round(oldPrice)) + ' руб.';
+    if (priceDisplay) priceDisplay.textContent = formatter.format(Math.round(finalPrice)) + ' BYN.';
+    if (oldPriceDisplay && oldPrice) oldPriceDisplay.textContent = formatter.format(Math.round(oldPrice)) + ' BYN.';
 }
 
 function addToCartFromProduct() {
