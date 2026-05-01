@@ -548,10 +548,10 @@ if (empty($recommended_for_you)) {
                             <div class="rfy-name"><?= $rfy_name ?></div>
                             <div class="rfy-price-block">
                                 <?php if ($rfy_disc > 0): ?>
-                                    <del class="rfy-old-price"><?= number_format($rfy_price, 0, '.', ' ') ?> руб.</del>
-                                    <span class="rfy-new-price text-danger"><?= number_format($rfy_final, 0, '.', ' ') ?> руб.</span>
+                                    <del class="rfy-old-price"><?= number_format($rfy_price, 0, '.', ' ') ?> BYN</del>
+                                    <span class="rfy-new-price text-danger"><?= number_format($rfy_final, 0, '.', ' ') ?> BYN</span>
                                 <?php else: ?>
-                                    <span class="rfy-new-price"><?= number_format($rfy_price, 0, '.', ' ') ?> руб.</span>
+                                    <span class="rfy-new-price"><?= number_format($rfy_price, 0, '.', ' ') ?> BYN</span>
                                 <?php endif; ?>
                             </div>
                             <?php if (!empty($rfy['rating']) && $rfy['rating'] > 0): ?>
