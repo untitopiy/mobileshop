@@ -696,14 +696,15 @@ if (empty($recommended_for_you)) {
 <!-- 🔥 ГАРАНТИРОВАННАЯ ИНИЦИАЛИЗАЦИЯ DROPDOWN (только для index.php) -->
 <script>
 
-// ========== ЧАСТИЦЫ ДЛЯ "ВАМ МОЖЕТ ПОНРАВИТЬСЯ" ==========
+
+// ========== ЧАСТИЦЫ
 (function() {
     var canvas = document.getElementById('rfy-particles');
     if (!canvas) return;
     
     var ctx = canvas.getContext('2d');
     var particles = [];
-    var mouse = { x: null, y: null, radius: 120 };
+    var mouse = { x: null, y: null, radius: 160 };
     var animationId = null;
     var isVisible = false;
     
@@ -715,23 +716,31 @@ if (empty($recommended_for_you)) {
     
     function createParticles() {
         particles = [];
-        var count = Math.min(Math.floor((canvas.width * canvas.height) / 12000), 80);
+        var count = Math.min(Math.floor((canvas.width * canvas.height) / 5000), 140);
         var colors = [
             'rgba(102, 126, 234,',
             'rgba(118, 75, 162,',
             'rgba(255, 193, 7,',
+            'rgba(200, 200, 255,',
             'rgba(255, 255, 255,'
         ];
         
         for (var i = 0; i < count; i++) {
+            var ox = Math.random() * canvas.width;
+            var oy = Math.random() * canvas.height;
             particles.push({
-                x: Math.random() * canvas.width,
-                y: Math.random() * canvas.height,
-                vx: (Math.random() - 0.5) * 0.8,
-                vy: (Math.random() - 0.5) * 0.8,
-                size: Math.random() * 2.5 + 0.5,
+                x: ox,
+                y: oy,
+                originX: ox,
+                originY: oy,
+                // УВЕЛИЧИЛИ начальную скорость и добавили гарантированный импульс
+                vx: (Math.random() - 0.5) * 1.5,
+                vy: (Math.random() - 0.5) * 1.5,
+                size: Math.random() * 3 + 2,
                 color: colors[Math.floor(Math.random() * colors.length)],
-                alpha: Math.random() * 0.5 + 0.2
+                alpha: Math.random() * 0.4 + 0.4,
+                // Счётчик кадров без движения — для принудительного пинка
+                idleFrames: 0
             });
         }
     }
@@ -754,53 +763,95 @@ if (empty($recommended_for_you)) {
         
         for (var i = 0; i < particles.length; i++) {
             var p = particles[i];
-            p.x += p.vx;
-            p.y += p.vy;
-            if (p.x < 0 || p.x > canvas.width) p.vx *= -1;
-            if (p.y < 0 || p.y > canvas.height) p.vy *= -1;
             
+            // === ПРИТЯГИВАНИЕ К МЫШИ ===
             if (mouse.x != null) {
                 var dx = mouse.x - p.x;
                 var dy = mouse.y - p.y;
                 var dist = Math.sqrt(dx * dx + dy * dy);
+                
                 if (dist < mouse.radius) {
                     var force = (mouse.radius - dist) / mouse.radius;
-                    p.vx += dx * force * 0.05;
-                    p.vy += dy * force * 0.05;
+                    p.vx += dx * force * 0.025;
+                    p.vy += dy * force * 0.025;
                 }
             }
             
+            // === ВОЗВРАТ НА ИСХОДНУЮ ПОЗИЦИЮ ===
+            var homeDx = p.originX - p.x;
+            var homeDy = p.originY - p.y;
+            p.vx += homeDx * 0.002;
+            p.vy += homeDy * 0.002;
+            
+            // === ТРЕНИЕ (адаптивное) ===
+            // Если скорость очень мала — меньше трения, чтобы не застыть
             var speed = Math.sqrt(p.vx * p.vx + p.vy * p.vy);
-            if (speed > 3) {
-                p.vx = (p.vx / speed) * 3;
-                p.vy = (p.vy / speed) * 3;
+            var friction = speed < 0.3 ? 0.99 : 0.96;
+            p.vx *= friction;
+            p.vy *= friction;
+            
+            // === ПРИНУДИТЕЛЬНЫЙ ПИНОК, ЕСЛИ ЗАСТЫЛА ===
+            if (speed < 0.15) {
+                p.idleFrames++;
+                if (p.idleFrames > 60) {  // через 60 кадров (~1 сек)
+                    p.vx += (Math.random() - 0.5) * 0.8;
+                    p.vy += (Math.random() - 0.5) * 0.8;
+                    p.idleFrames = 0;
+                }
+            } else {
+                p.idleFrames = 0;
             }
             
+            // === ДВИЖЕНИЕ ===
+            p.x += p.vx;
+            p.y += p.vy;
+            
+            // Отскок от стенок
+            if (p.x < 0 || p.x > canvas.width) {
+                p.vx *= -0.8;
+                p.x = Math.max(0, Math.min(canvas.width, p.x));
+            }
+            if (p.y < 0 || p.y > canvas.height) {
+                p.vy *= -0.8;
+                p.y = Math.max(0, Math.min(canvas.height, p.y));
+            }
+            
+            // Ограничение скорости
+            if (speed > 5) {
+                p.vx = (p.vx / speed) * 5;
+                p.vy = (p.vy / speed) * 5;
+            }
+            
+            // === РИСУЕМ КРУГЛУЮ ЧАСТИЦУ ===
             ctx.beginPath();
             ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
             ctx.fillStyle = p.color + p.alpha + ')';
+            ctx.shadowBlur = 12;
+            ctx.shadowColor = p.color + '0.6)';
             ctx.fill();
-            ctx.shadowBlur = 10;
-            ctx.shadowColor = p.color + '0.3)';
         }
         ctx.shadowBlur = 0;
         
+        // === СОЕДИНИТЕЛЬНЫЕ ЛИНИИ ===
         for (var i = 0; i < particles.length; i++) {
             for (var j = i + 1; j < particles.length; j++) {
                 var dx = particles[i].x - particles[j].x;
                 var dy = particles[i].y - particles[j].y;
                 var dist = Math.sqrt(dx * dx + dy * dy);
-                var maxDist = 100;
+                var maxDist = 140;
+                
                 if (dist < maxDist) {
                     ctx.beginPath();
                     ctx.moveTo(particles[i].x, particles[i].y);
                     ctx.lineTo(particles[j].x, particles[j].y);
-                    var opacity = (1 - dist / maxDist) * 0.15;
-                    ctx.strokeStyle = 'rgba(102, 126, 234, ' + opacity + ')';
-                    ctx.lineWidth = 0.6;
+                    var opacity = (1 - dist / maxDist) * 0.4;
+                    ctx.strokeStyle = 'rgba(140, 170, 255, ' + opacity + ')';
+                    ctx.lineWidth = 1.0;
                     ctx.stroke();
                 }
             }
+            
+            // Линии к мыши
             if (mouse.x != null) {
                 var dx = mouse.x - particles[i].x;
                 var dy = mouse.y - particles[i].y;
@@ -809,9 +860,9 @@ if (empty($recommended_for_you)) {
                     ctx.beginPath();
                     ctx.moveTo(particles[i].x, particles[i].y);
                     ctx.lineTo(mouse.x, mouse.y);
-                    var opacity = (1 - dist / mouse.radius) * 0.3;
-                    ctx.strokeStyle = 'rgba(255, 193, 7, ' + opacity + ')';
-                    ctx.lineWidth = 0.8;
+                    var opacity = (1 - dist / mouse.radius) * 0.6;
+                    ctx.strokeStyle = 'rgba(255, 200, 50, ' + opacity + ')';
+                    ctx.lineWidth = 1.5;
                     ctx.stroke();
                 }
             }
@@ -1184,6 +1235,7 @@ if (empty($recommended_for_you)) {
     height: 100%;
     z-index: 1;
     pointer-events: none;
+    filter: contrast(1.2) brightness(1.1);
 }
 .rfy-section .container {
     position: relative;
