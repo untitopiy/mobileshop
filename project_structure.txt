@@ -1,0 +1,348 @@
+mobileshop
+├── .idea
+│   ├── .gitignore
+│   ├── .name
+│   ├── mobileshop.iml
+│   ├── modules.xml
+│   ├── php.xml
+│   ├── vcs.xml
+├── admin
+│   ├── accessory_supported.php
+│   ├── add_accessory.php
+│   ├── add_product.php
+│   ├── add_seller.php
+│   ├── add_smartphone.php
+│   ├── add_variation.php
+│   ├── change_order_status.php
+│   ├── change_status.php
+│   ├── check_admin.php
+│   ├── delete_accessory.php
+│   ├── delete_order.php
+│   ├── delete_product.php
+│   ├── delete_smartphone.php
+│   ├── delete_user.php
+│   ├── edit_accessory.php
+│   ├── edit_order.php
+│   ├── edit_product.php
+│   ├── edit_seller.php
+│   ├── edit_smartphone.php
+│   ├── edit_user.php
+│   ├── edit_variation.php
+│   ├── get_attribute_values.php
+│   ├── index.php
+│   ├── manage_categories.php
+│   ├── manage_coupons.php
+│   ├── manage_newsletter.php
+│   ├── manage_orders.php
+│   ├── manage_products.php
+│   ├── manage_promotions.php
+│   ├── manage_sellers.php
+│   ├── manage_users.php
+│   ├── product_images.php
+│   ├── product_variations.php
+│   ├── seller_transactions.php
+│   ├── smartphone_specs.php
+│   ├── toggle_admin.php
+│   ├── view_order.php
+├── assets
+│   ├── banner.jpg
+│   ├── default-profile.png
+│   ├── logo.webp
+├── inc
+│   ├── Для скринов.js
+│   ├── checkout.js
+│   ├── db.php
+│   ├── footer.php
+│   ├── functions.php
+│   ├── header.php
+│   ├── mail.php
+│   ├── menu.php
+│   ├── scripts.js
+│   ├── styles.css
+├── models
+│   ├── Review.php
+├── pages
+│   ├── cart
+│   │   ├── Api_Cart.php
+│   │   ├── cart_view.php
+│   │   ├── cart.css
+│   │   ├── cart.js
+│   │   ├── cart.php
+│   │   ├── CartController.php
+│   │   ├── CartHelper.php
+│   │   ├── CartItemDTO.php
+│   │   ├── generate_csrf.php
+│   │   ├── GuestCartService.php
+│   ├── photo
+│   │   ├── photo_678b9c906b01b1.98669165.png
+│   │   ├── photo_67adbdf9315519.81319809.jpg
+│   │   ├── photo_67adbf0360d4f3.67806690.jpg
+│   │   ├── photo_67cf4e5dc73b65.79923781.jpg
+│   ├── auth.php
+│   ├── compare.php
+│   ├── edit-profile.php
+│   ├── like_review.php
+│   ├── logout.php
+│   ├── profile.php
+│   ├── reg.php
+│   ├── reviews_template.php
+│   ├── update_compare.php
+│   ├── wishlist.php
+├── seller
+│   ├── add_product_seller.php
+│   ├── dashboard.php
+│   ├── delete_product.php
+│   ├── edit_product.php
+│   ├── my_products.php
+├── templates
+│   ├── reviews_template.php
+├── test_bot
+│   ├── static
+│   │   ├── chat.js
+│   │   ├── style.css
+│   ├── templates
+│   │   ├── index.html
+│   ├── .env
+│   ├── app.py
+│   ├── requirements.txt
+├── uploads
+│   ├── products
+│   │   ├── 09715bebfba972a6b2ce1e8afcc12e30_434_434_70.avif
+│   │   ├── 1_04a2b50d-46f7-40ef-a1a1-b5460f388cfb-417x417.jpg.webp
+│   │   ├── 1.jpg
+│   │   ├── 1.jpg.webp
+│   │   ├── 2.jpg (1).webp
+│   │   ├── 2.jpg.webp
+│   │   ├── 20240521130519298_20220616130654845_Realme_Buds_Air_3_Blue_5.jpg
+│   │   ├── 28qar71s5ci13qv141wv838652un4is1.jpg
+│   │   ├── 2lsblms7z2tmkagz7ro45k8d4rwh4wch.webp
+│   │   ├── 326695c519260ab639d2ae23d07f63cc_434_434_70.avif
+│   │   ├── 6658629241.webp
+│   │   ├── 6665448359.webp
+│   │   ├── 6758376602.webp
+│   │   ├── 682ba9f3562e1-500x500.webp
+│   │   ├── 6834e380908b6-500x500.webp
+│   │   ├── 6852438187.webp
+│   │   ├── 6861376983.webp
+│   │   ├── 68e0475f102e6-500x500.webp
+│   │   ├── 68e0475f2d211-74x74.webp
+│   │   ├── 6901887819.webp
+│   │   ├── 6901887824.webp
+│   │   ├── 696aec21e3948-500x500.webp
+│   │   ├── 6998d93739ceb-500x500.webp
+│   │   ├── 6998d937efcd8-74x74.webp
+│   │   ├── 7211328363.webp
+│   │   ├── 7248125765.webp
+│   │   ├── 7248125767.webp
+│   │   ├── 7248125770.webp
+│   │   ├── 7347861785.webp
+│   │   ├── 7374956871.webp
+│   │   ├── 7374956873.webp
+│   │   ├── 7404641538.webp
+│   │   ├── 7404641562.webp
+│   │   ├── 7411792241.webp
+│   │   ├── 7441057159 (1).webp
+│   │   ├── 7441057159 (2).webp
+│   │   ├── 7441057159.webp
+│   │   ├── 7441057217 (1).webp
+│   │   ├── 7441057217.webp
+│   │   ├── 7444935916 (1).webp
+│   │   ├── 7444935916.webp
+│   │   ├── 7446780129.webp
+│   │   ├── 7474129070.webp
+│   │   ├── 7474129093.webp
+│   │   ├── 7587851865.webp
+│   │   ├── 7587851875.webp
+│   │   ├── 7669953866.webp
+│   │   ├── 7752799640.webp
+│   │   ├── 7752799865.webp
+│   │   ├── 7844799773.webp
+│   │   ├── 7984835972.webp
+│   │   ├── 8014606937.webp
+│   │   ├── 8014607092.webp
+│   │   ├── 8020012928.webp
+│   │   ├── 8020012968.webp
+│   │   ├── 8020013000.webp
+│   │   ├── 8074515182.webp
+│   │   ├── 8074515861.webp
+│   │   ├── 8074515895.webp
+│   │   ├── 8323904800.webp
+│   │   ├── 8323904846.webp
+│   │   ├── 8346963432.webp
+│   │   ├── 8354567425.webp
+│   │   ├── 8380920352.webp
+│   │   ├── 8442906216.webp
+│   │   ├── 8492984340.webp
+│   │   ├── 8524908854.webp
+│   │   ├── 8632215707.webp
+│   │   ├── 8632215920.webp
+│   │   ├── 8632215970.webp
+│   │   ├── 8789d0e96a75406ac6085c1b0d6e262a.webp
+│   │   ├── 87e0d43f-da8a-44d0-bc50-d453349bf000.webp
+│   │   ├── 8806018748.webp
+│   │   ├── 8806035401.webp
+│   │   ├── 9051607911.webp
+│   │   ├── 9121873740.webp
+│   │   ├── 9121874426.webp
+│   │   ├── 9139028427.webp
+│   │   ├── 9139028510.webp
+│   │   ├── 9139028661.webp
+│   │   ├── 9426ceb6-e573-4600-96e8-621057efd873.png
+│   │   ├── 9702791102.webp
+│   │   ├── 9858857_319838b69e762ad33e3cc0e8c8bf5cca.webp
+│   │   ├── 9858857_5335d91622484b71cd2fa08a2e7066ab.webp
+│   │   ├── 9858857_a29ce241538619503462e590e8d27e8c.webp
+│   │   ├── 9yb34xjbeg86xnfudm2sgjf5p106agoa.webp
+│   │   ├── a0a481d2659a143d3b745aa035d3456e.webp
+│   │   ├── a2a498ee68c359b701164a48ae6014f3.webp
+│   │   ├── cab67d795f56e602ebecbe5bf69cd71b.webp
+│   │   ├── catalog-easyphoto-tmp-photo-1-2025-07-22-10-25-54-jpg-1-600x600.jpg
+│   │   ├── catalog-easyphoto-tmp-photo-2-2025-07-22-10-25-54-jpg-2-600x600.jpg
+│   │   ├── d4ffaf2e-f0a8-4910-98f1-ebb0333e131d.webp
+│   │   ├── d9c194b729a35d8cb03e65585a1f7bea.webp
+│   │   ├── ec80e4669d0934ba17611896149e63f3.webp
+│   │   ├── haqyol1uk01zbd96qcbr6jlv5skmpkos.webp
+│   │   ├── hmfli5c26uzxjvj25pslwvu2vox8za67.webp
+│   │   ├── mffnp61xyz37ol7xh1ix3u1vzvbfmy5r.webp
+│   │   ├── product_69be8e4cb47912.31041461.jpg
+│   │   ├── product_69be8f1b183142.58682436.jpg
+│   │   ├── product_69be8ffe5d40d1.97207479.jpg
+│   │   ├── product_69be90a107b9d0.54951918.jpg
+│   │   ├── product_69be90a364a253.88231903.jpg
+│   │   ├── product_69be91e5d40491.84173753.jpg
+│   │   ├── product_69be92225fef80.24348440.jpg
+│   │   ├── product_69bea2feaef100.50620677.jpg
+│   │   ├── product_69bf0b767ba653.33723165.jpg
+│   │   ├── product_69de7dcd48a9c0.87627731.webp
+│   │   ├── product_69de7dd374cf75.87235423.jpg
+│   │   ├── product_69de7e2e025290.62269511.jpg
+│   │   ├── product_69de80da2befc0.17276218.webp
+│   │   ├── product_69de829a97c687.98879119.webp
+│   │   ├── product_69de82cad83c87.64783196.webp
+│   │   ├── product_69de8410223ff9.59506673.jpg
+│   │   ├── product_69de847a973ec5.54158414.webp
+│   │   ├── product_69de85198fb653.76495604.webp
+│   │   ├── product_69de8644772872.51582281.webp
+│   │   ├── product_69de86dbe81b69.18957461.webp
+│   │   ├── product_69de86dbe89d25.65957359.webp
+│   │   ├── product_69de87107f1714.37047318.webp
+│   │   ├── product_69de87107f99b0.20720756.webp
+│   │   ├── product_69de88f719c485.37185166.webp
+│   │   ├── product_69de88f71a3d39.63068808.webp
+│   │   ├── product_69de88f71b13d2.44102783.webp
+│   │   ├── product_69de8a4fc92b54.54684609.webp
+│   │   ├── product_69de8a4fc9a9e0.70838184.jpg
+│   │   ├── product_69de8b0e797df8.93165858.webp
+│   │   ├── product_69de8b0e7a02b5.68424003.webp
+│   │   ├── product_69de8b541c2a48.64879887.webp
+│   │   ├── product_69de8c3a82ef49.67138901.png
+│   │   ├── product_69de90855f19e0.83713076.webp
+│   │   ├── product_69de90855fac35.49790795.webp
+│   │   ├── product_69de90d72e1322.93858396.webp
+│   │   ├── product_69de90d72e9b96.11673170.webp
+│   │   ├── product_69de90d72f13c9.60643595.webp
+│   │   ├── product_69de90d72f8117.13787330.webp
+│   │   ├── product_69de94022d2b18.54958575.webp
+│   │   ├── product_69de94022daab5.67034143.webp
+│   │   ├── product_69de9441d92fe5.34544646.webp
+│   │   ├── product_69de9441d9b026.63947380.webp
+│   │   ├── product_69de9473321ec9.73058518.webp
+│   │   ├── product_69de9473329eb3.59589056.webp
+│   │   ├── product_69de94b0c282b7.37445373.webp
+│   │   ├── product_69de94b0c30a54.43380718.webp
+│   │   ├── product_69de94e21330e5.75928681.webp
+│   │   ├── product_69de94e213cfe7.21662007.webp
+│   │   ├── product_69de95220e2df2.27582259.webp
+│   │   ├── product_69de95220eab82.35091942.webp
+│   │   ├── product_69de96ff4d7ee0.05715117.webp
+│   │   ├── product_69de96ff4e0b44.85993899.webp
+│   │   ├── product_69de985ccb4913.38081112.webp
+│   │   ├── product_69de985ccbd830.41541384.webp
+│   │   ├── product_69dfbc2b583636.79863783.webp
+│   │   ├── product_69dfbc2b58ce56.52059552.webp
+│   │   ├── product_69dfbc2b593e34.66398187.webp
+│   │   ├── product_69dfbcacc75501.73044449.webp
+│   │   ├── product_69dfbcacc7d673.19184159.webp
+│   │   ├── product_69dfbcacc82d67.25619255.webp
+│   │   ├── product_69dfbd0f130068.73563373.webp
+│   │   ├── product_69dfbd0f1360b4.24793463.webp
+│   │   ├── product_69dfbd0f13b8a3.57202616.webp
+│   │   ├── product_69dfbd5b9a23f7.49308615.webp
+│   │   ├── product_69dfbd5b9a8478.36022492.webp
+│   │   ├── product_69dfbd5b9adeb5.68160020.webp
+│   │   ├── product_69dfbdaf8336c6.01190164.webp
+│   │   ├── product_69dfbdaf83afa7.36541886.webp
+│   │   ├── product_69dfbdaf841dd2.68431090.webp
+│   │   ├── product_69dfbdf01c7422.04371719.webp
+│   │   ├── product_69dfbdf01d3ab2.26802013.webp
+│   │   ├── product_69dfbdf01de182.86624379.webp
+│   │   ├── product_69dfbe720b30a0.26567408.webp
+│   │   ├── product_69dfbe720b8c80.52611035.webp
+│   │   ├── product_69dfbe720bd892.16574516.webp
+│   │   ├── product_69dfbecf6bc9f3.15510585.webp
+│   │   ├── product_69dfbecf6c4734.92449723.webp
+│   │   ├── product_69dfbecf6d1730.02529223.webp
+│   │   ├── product_69dfbf4a5ac986.54279350.webp
+│   │   ├── product_69dfbf4a5b46c9.20053919.webp
+│   │   ├── product_69dfbf834a11d3.80441885.webp
+│   │   ├── product_69dfbffb4088f4.42522989.webp
+│   │   ├── product_69dfbffb410091.79090908.webp
+│   │   ├── product_69dfc1538678f1.28896748.webp
+│   │   ├── product_69dfc153870986.69000042.webp
+│   │   ├── product_69dfc1b12c0145.06480892.webp
+│   │   ├── product_69dfc1b12c95f0.63368544.webp
+│   │   ├── product_69dfc1e6b63765.27823652.webp
+│   │   ├── product_69dfc1e6b6c3f2.74661040.webp
+│   │   ├── product_69dfc2148990f4.29134940.webp
+│   │   ├── product_69dfc2148a1e60.94258079.webp
+│   │   ├── product_69dfc2a3cda1d2.91620138.webp
+│   │   ├── product_69dfc2a3ce29c2.18943873.webp
+│   │   ├── product_69dfc2a3ce9cc2.00754557.webp
+│   │   ├── product_69dfc2d34703a1.47883906.webp
+│   │   ├── product_69dfc2d3476dc1.21983653.webp
+│   │   ├── product_69dfc31e49db56.88948844.webp
+│   │   ├── product_69dfc31e4a7305.79337836.webp
+│   │   ├── product_69dfc346b79d94.07070142.webp
+│   │   ├── product_69dfc346b81df1.44700294.webp
+│   │   ├── product_69e11e3f2192d2.08926579.jpg
+│   │   ├── product_69e11e3f231109.60541575.webp
+│   ├── variations
+│   │   ├── var_61_69beb430dabc7.jpg
+│   │   ├── var_61_69beb46812b7a.jpg
+│   │   ├── var_61_69beb529b5ab6.jpg
+│   │   ├── var_61_69beb62f83321.jpg
+│   ├── 13.jpg
+│   ├── 14.jpg
+│   ├── 15.1.jpg
+│   ├── 15.2.jpg
+│   ├── 16.jpg
+│   ├── img_67cf660a329646.37128032.png
+│   ├── img_67cf669f83fbd7.82736137.png
+│   ├── img_67cf670587f5c8.14580958.jpg
+│   ├── img_68ebca897fff09.13787235.jpg
+│   ├── xonor.jpg
+├── ~$мятка по виртуальному окружению.docx
+├── Баги и  не проверенные страницы
+├── Памятка по виртуальному окружению.docx
+├── Пароли.txt
+├── accessories.php
+├── accessory.php
+├── add_review.php
+├── api_products.php
+├── catalog.php
+├── checkout.php
+├── composer.json
+├── composer.lock
+├── filter.php
+├── Git_hub_Gaid
+├── index.php
+├── main.php
+├── marketplace.sql
+├── order_details.php
+├── orders.php
+├── product.php
+├── project_structure.txt
+├── reorder.php
+├── search_ajax.php
+├── stocks.php
+├── success.php
