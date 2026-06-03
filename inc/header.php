@@ -115,74 +115,158 @@ if (!$db_error) {
     <link rel="stylesheet" href="<?php echo $base_url; ?>style.css">
 
     <style>
-        .catalog-container { position: relative; }
-        .catalog-menu {
-            display: none;
-            position: absolute;
-            top: 100%;
-            left: 0;
-            width: 260px;
-            background: #fff;
-            box-shadow: 0 10px 25px rgba(0,0,0,0.1);
-            border-radius: 8px;
-            padding: 15px 0;
-            z-index: 2000;
+    .catalog-container {
+        position: relative;
+        margin-left: 0;
+        flex: 0 0 auto;
+    }
+
+    .catalog-menu {
+        display: none;
+        position: absolute;
+        top: 100%;
+        left: 0;
+        width: 260px;
+        background: #fff;
+        box-shadow: 0 10px 25px rgba(0,0,0,0.1);
+        border-radius: 8px;
+        padding: 15px 0;
+        z-index: 2000;
+    }
+
+    .catalog-menu.active { display: block; }
+    .catalog-list { list-style: none; padding: 0; margin: 0; }
+    .catalog-list li { border-bottom: 1px solid #f1f1f1; }
+    .catalog-list li:last-child { border-bottom: none; }
+
+    .catalog-list a {
+        display: block;
+        padding: 10px 20px;
+        color: #333;
+        text-decoration: none;
+        transition: background 0.2s;
+    }
+
+    .catalog-list a:hover {
+        background: #f8f9fa;
+        color: #0d6efd;
+    }
+
+    .header-container {
+        display: flex;
+        align-items: center;
+        gap: 16px;
+        flex-wrap: nowrap;
+    }
+
+    .logo {
+        flex: 0 0 auto;
+    }
+
+    .catalog-btn {
+        white-space: nowrap;
+        margin-left: 0;
+    }
+
+    .search-wrapper {
+        display: flex !important;
+        align-items: stretch !important;
+        flex: 0 1 720px;
+        width: 100%;
+        max-width: 720px;
+        min-width: 420px;
+        margin: 0 auto !important; /* центрирование */
+    }
+
+    .search-wrapper .search-input-holder {
+        position: relative;
+        flex: 1 1 auto;
+    }
+
+    .search-wrapper #global-search {
+        width: 100%;
+        height: 44px;
+        border-top-right-radius: 0;
+        border-bottom-right-radius: 0;
+    }
+
+    .search-wrapper .search-btn {
+        width: 54px;
+        height: 44px;
+        padding: 0;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        flex: 0 0 54px;
+        border-top-left-radius: 0;
+        border-bottom-left-radius: 0;
+    }
+
+    /* Dropdown меню админа */
+    .dropdown-menu {
+        z-index: 9999 !important;
+    }
+
+    .dropdown {
+        position: relative !important;
+    }
+
+    .old-menu-wrapper {
+        flex: 0 0 auto;
+        margin-left: 0;
+    }
+
+    .navigation-wrapper {
+        position: relative;
+        z-index: 1001;
+    }
+
+    .cart-link {
+        position: relative;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        color: #fff;
+        text-decoration: none;
+        padding: 8px 15px;
+        background: rgba(255,255,255,0.1);
+        border-radius: 25px;
+        transition: all 0.2s;
+    }
+
+    .cart-link:hover {
+        background: rgba(255,255,255,0.2);
+        color: #fff;
+    }
+
+    .cart-count {
+        background: #ff4757;
+        color: white;
+        border-radius: 20px;
+        padding: 2px 8px;
+        font-size: 12px;
+        min-width: 22px;
+        text-align: center;
+    }
+
+    @media (max-width: 991.98px) {
+        .header-container {
+            flex-wrap: wrap;
         }
-        .catalog-menu.active { display: block; }
-        .catalog-list { list-style: none; padding: 0; margin: 0; }
-        .catalog-list li { border-bottom: 1px solid #f1f1f1; }
-        .catalog-list li:last-child { border-bottom: none; }
-        .catalog-list a {
-            display: block;
-            padding: 10px 20px;
-            color: #333;
-            text-decoration: none;
-            transition: background 0.2s;
+
+        .search-wrapper {
+            order: 3;
+            flex: 1 1 100%;
+            max-width: 100%;
+            min-width: 100%;
+            margin-top: 10px !important;
         }
-        .catalog-list a:hover { background: #f8f9fa; color: #0d6efd; }
-        
-        /* Dropdown меню админа */
-        .dropdown-menu {
-            z-index: 9999 !important;
-        }
-        .dropdown {
-            position: relative !important;
-        }
+
         .old-menu-wrapper {
-            position: relative;
-            z-index: 1000;
+            margin-left: 0;
         }
-        .navigation-wrapper {
-            position: relative;
-            z-index: 1001;
-        }
-        
-        .cart-link {
-            position: relative;
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            color: #fff;
-            text-decoration: none;
-            padding: 8px 15px;
-            background: rgba(255,255,255,0.1);
-            border-radius: 25px;
-            transition: all 0.2s;
-        }
-        .cart-link:hover {
-            background: rgba(255,255,255,0.2);
-            color: #fff;
-        }
-        .cart-count {
-            background: #ff4757;
-            color: white;
-            border-radius: 20px;
-            padding: 2px 8px;
-            font-size: 12px;
-            min-width: 22px;
-            text-align: center;
-        }
-    </style>
+    }
+</style>
 </head>
 <body>
 
@@ -205,12 +289,15 @@ if (!$db_error) {
 
 <header class="main-header" style="position: relative; z-index: 1000;">
     <div class="container-fluid header-container" style="padding: 0 20px;">
-        <div class="logo" onclick="location.href='<?php echo $base_url; ?>'" style="cursor: pointer;">SHOP<span>HUB</span></div>
+        <div class="logo" onclick="location.href='<?php echo $base_url; ?>'" style="cursor: pointer;">
+            SHOP<span>HUB</span>
+        </div>
 
         <div class="catalog-container">
             <button class="catalog-btn btn btn-dark" id="catalog-trigger" type="button">
                 <i class="fas fa-bars"></i> Каталог
             </button>
+
             <div class="catalog-menu" id="catalog-menu">
                 <ul class="catalog-list">
                     <li style="border-bottom: 1px solid #eee;">
@@ -218,11 +305,12 @@ if (!$db_error) {
                             <i class="fas fa-th-large me-2"></i> Все товары
                         </a>
                     </li>
+
                     <?php if (!empty($categories)): ?>
                         <?php foreach ($categories as $cat): ?>
                             <li>
                                 <a href="<?php echo $base_url; ?>catalog.php?category=<?php echo $cat['id']; ?>">
-                                    <i class="fas fa-chevron-right me-2"></i> 
+                                    <i class="fas fa-chevron-right me-2"></i>
                                     <?php echo htmlspecialchars($cat['name']); ?>
                                 </a>
                             </li>
@@ -234,12 +322,19 @@ if (!$db_error) {
             </div>
         </div>
 
-        <div class="search-wrapper d-flex align-items-center ms-4 me-4" style="width: 100%; max-width: 600px;">
-            <div style="position: relative; width: 100%;">
-                <input type="text" id="global-search" class="form-control" placeholder="Поиск электроники..." autocomplete="off">
+        <div class="search-wrapper">
+            <div class="search-input-holder">
+                <input
+                    type="text"
+                    id="global-search"
+                    class="form-control"
+                    placeholder="Поиск электроники..."
+                    autocomplete="off"
+                >
                 <div id="search-results" class="search-results-dropdown"></div>
             </div>
-            <button type="button" class="btn btn-primary ms-2" style="width: 42px; height: 38px; padding: 0; display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0;">
+
+            <button type="button" class="btn btn-primary search-btn">
                 <i class="fas fa-search"></i>
             </button>
         </div>

@@ -697,7 +697,7 @@ if (empty($recommended_for_you)) {
 <script>
 
 
-// ========== ЧАСТИЦЫ
+// ЧАСТИЦЫ ПАРТИКЛЫ
 (function() {
     var canvas = document.getElementById('rfy-particles');
     if (!canvas) return;
