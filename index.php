@@ -698,25 +698,44 @@ if (empty($recommended_for_you)) {
 
 
 // ЧАСТИЦЫ ПАРТИКЛЫ
-(function() {
+(function () {
     var canvas = document.getElementById('rfy-particles');
-    if (!canvas) return;
-    
+    var section = document.getElementById('rfy-section');
+    if (!canvas || !section) return;
+
     var ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
     var particles = [];
     var mouse = { x: null, y: null, radius: 160 };
     var animationId = null;
     var isVisible = false;
-    
+
+    var viewWidth = 0;
+    var viewHeight = 0;
+    var dpr = 1;
+
     function resize() {
-        var section = canvas.parentElement;
-        canvas.width = section.offsetWidth;
-        canvas.height = section.offsetHeight;
+        var rect = section.getBoundingClientRect();
+        if (!rect.width || !rect.height) return false;
+
+        viewWidth = rect.width;
+        viewHeight = rect.height;
+        dpr = Math.min(window.devicePixelRatio || 1, 2);
+
+        canvas.style.width = viewWidth + 'px';
+        canvas.style.height = viewHeight + 'px';
+        canvas.width = Math.round(viewWidth * dpr);
+        canvas.height = Math.round(viewHeight * dpr);
+
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        return true;
     }
-    
+
     function createParticles() {
         particles = [];
-        var count = Math.min(Math.floor((canvas.width * canvas.height) / 5000), 140);
+
+        var count = Math.min(Math.floor((viewWidth * viewHeight) / 5000), 140);
         var colors = [
             'rgba(102, 126, 234,',
             'rgba(118, 75, 162,',
@@ -724,76 +743,57 @@ if (empty($recommended_for_you)) {
             'rgba(200, 200, 255,',
             'rgba(255, 255, 255,'
         ];
-        
+
         for (var i = 0; i < count; i++) {
-            var ox = Math.random() * canvas.width;
-            var oy = Math.random() * canvas.height;
+            var ox = Math.random() * viewWidth;
+            var oy = Math.random() * viewHeight;
+
             particles.push({
                 x: ox,
                 y: oy,
                 originX: ox,
                 originY: oy,
-                // УВЕЛИЧИЛИ начальную скорость и добавили гарантированный импульс
                 vx: (Math.random() - 0.5) * 1.5,
                 vy: (Math.random() - 0.5) * 1.5,
                 size: Math.random() * 3 + 2,
                 color: colors[Math.floor(Math.random() * colors.length)],
                 alpha: Math.random() * 0.4 + 0.4,
-                // Счётчик кадров без движения — для принудительного пинка
                 idleFrames: 0
             });
         }
     }
-    
-    var section = document.getElementById('rfy-section');
-    if (section) {
-        section.addEventListener('mousemove', function(e) {
-            var rect = canvas.getBoundingClientRect();
-            mouse.x = e.clientX - rect.left;
-            mouse.y = e.clientY - rect.top;
-        });
-        section.addEventListener('mouseleave', function() {
-            mouse.x = null;
-            mouse.y = null;
-        });
-    }
-    
+
     function drawParticles() {
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
-        
+        ctx.clearRect(0, 0, viewWidth, viewHeight);
+
         for (var i = 0; i < particles.length; i++) {
             var p = particles[i];
-            
-            // === ПРИТЯГИВАНИЕ К МЫШИ ===
-            if (mouse.x != null) {
-                var dx = mouse.x - p.x;
-                var dy = mouse.y - p.y;
-                var dist = Math.sqrt(dx * dx + dy * dy);
-                
-                if (dist < mouse.radius) {
-                    var force = (mouse.radius - dist) / mouse.radius;
-                    p.vx += dx * force * 0.025;
-                    p.vy += dy * force * 0.025;
+
+            if (mouse.x != null && mouse.y != null) {
+                var mdx = mouse.x - p.x;
+                var mdy = mouse.y - p.y;
+                var mdist = Math.sqrt(mdx * mdx + mdy * mdy);
+
+                if (mdist < mouse.radius && mdist > 0) {
+                    var force = (mouse.radius - mdist) / mouse.radius;
+                    p.vx += mdx * force * 0.025;
+                    p.vy += mdy * force * 0.025;
                 }
             }
-            
-            // === ВОЗВРАТ НА ИСХОДНУЮ ПОЗИЦИЮ ===
+
             var homeDx = p.originX - p.x;
             var homeDy = p.originY - p.y;
             p.vx += homeDx * 0.002;
             p.vy += homeDy * 0.002;
-            
-            // === ТРЕНИЕ (адаптивное) ===
-            // Если скорость очень мала — меньше трения, чтобы не застыть
+
             var speed = Math.sqrt(p.vx * p.vx + p.vy * p.vy);
             var friction = speed < 0.3 ? 0.99 : 0.96;
             p.vx *= friction;
             p.vy *= friction;
-            
-            // === ПРИНУДИТЕЛЬНЫЙ ПИНОК, ЕСЛИ ЗАСТЫЛА ===
+
             if (speed < 0.15) {
                 p.idleFrames++;
-                if (p.idleFrames > 60) {  // через 60 кадров (~1 сек)
+                if (p.idleFrames > 60) {
                     p.vx += (Math.random() - 0.5) * 0.8;
                     p.vy += (Math.random() - 0.5) * 0.8;
                     p.idleFrames = 0;
@@ -801,28 +801,26 @@ if (empty($recommended_for_you)) {
             } else {
                 p.idleFrames = 0;
             }
-            
-            // === ДВИЖЕНИЕ ===
+
             p.x += p.vx;
             p.y += p.vy;
-            
-            // Отскок от стенок
-            if (p.x < 0 || p.x > canvas.width) {
+
+            if (p.x < 0 || p.x > viewWidth) {
                 p.vx *= -0.8;
-                p.x = Math.max(0, Math.min(canvas.width, p.x));
+                p.x = Math.max(0, Math.min(viewWidth, p.x));
             }
-            if (p.y < 0 || p.y > canvas.height) {
+
+            if (p.y < 0 || p.y > viewHeight) {
                 p.vy *= -0.8;
-                p.y = Math.max(0, Math.min(canvas.height, p.y));
+                p.y = Math.max(0, Math.min(viewHeight, p.y));
             }
-            
-            // Ограничение скорости
+
+            speed = Math.sqrt(p.vx * p.vx + p.vy * p.vy);
             if (speed > 5) {
                 p.vx = (p.vx / speed) * 5;
                 p.vy = (p.vy / speed) * 5;
             }
-            
-            // === РИСУЕМ КРУГЛУЮ ЧАСТИЦУ ===
+
             ctx.beginPath();
             ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
             ctx.fillStyle = p.color + p.alpha + ')';
@@ -830,73 +828,109 @@ if (empty($recommended_for_you)) {
             ctx.shadowColor = p.color + '0.6)';
             ctx.fill();
         }
+
         ctx.shadowBlur = 0;
-        
-        // === СОЕДИНИТЕЛЬНЫЕ ЛИНИИ ===
+
         for (var i = 0; i < particles.length; i++) {
             for (var j = i + 1; j < particles.length; j++) {
                 var dx = particles[i].x - particles[j].x;
                 var dy = particles[i].y - particles[j].y;
                 var dist = Math.sqrt(dx * dx + dy * dy);
                 var maxDist = 140;
-                
+
                 if (dist < maxDist) {
                     ctx.beginPath();
                     ctx.moveTo(particles[i].x, particles[i].y);
                     ctx.lineTo(particles[j].x, particles[j].y);
                     var opacity = (1 - dist / maxDist) * 0.4;
                     ctx.strokeStyle = 'rgba(140, 170, 255, ' + opacity + ')';
-                    ctx.lineWidth = 1.0;
+                    ctx.lineWidth = 1;
                     ctx.stroke();
                 }
             }
-            
-            // Линии к мыши
-            if (mouse.x != null) {
-                var dx = mouse.x - particles[i].x;
-                var dy = mouse.y - particles[i].y;
-                var dist = Math.sqrt(dx * dx + dy * dy);
-                if (dist < mouse.radius) {
+
+            if (mouse.x != null && mouse.y != null) {
+                var mx = mouse.x - particles[i].x;
+                var my = mouse.y - particles[i].y;
+                var mouseDist = Math.sqrt(mx * mx + my * my);
+
+                if (mouseDist < mouse.radius) {
                     ctx.beginPath();
                     ctx.moveTo(particles[i].x, particles[i].y);
                     ctx.lineTo(mouse.x, mouse.y);
-                    var opacity = (1 - dist / mouse.radius) * 0.6;
-                    ctx.strokeStyle = 'rgba(255, 200, 50, ' + opacity + ')';
+                    var mouseOpacity = (1 - mouseDist / mouse.radius) * 0.6;
+                    ctx.strokeStyle = 'rgba(255, 200, 50, ' + mouseOpacity + ')';
                     ctx.lineWidth = 1.5;
                     ctx.stroke();
                 }
             }
         }
     }
-    
+
     function animate() {
-        if (!isVisible) return;
+        if (!isVisible) {
+            animationId = null;
+            return;
+        }
+
         drawParticles();
         animationId = requestAnimationFrame(animate);
     }
-    
-    var observer = new IntersectionObserver(function(entries) {
-        entries.forEach(function(entry) {
+
+    function startAnimation() {
+        if (!animationId) {
+            animationId = requestAnimationFrame(animate);
+        }
+    }
+
+    function stopAnimation() {
+        if (animationId) {
+            cancelAnimationFrame(animationId);
+            animationId = null;
+        }
+    }
+
+    function reinitParticles() {
+        if (resize()) {
+            createParticles();
+            drawParticles();
+            if (isVisible) startAnimation();
+        }
+    }
+
+    section.addEventListener('mousemove', function (e) {
+        var rect = canvas.getBoundingClientRect();
+        mouse.x = e.clientX - rect.left;
+        mouse.y = e.clientY - rect.top;
+    });
+
+    section.addEventListener('mouseleave', function () {
+        mouse.x = null;
+        mouse.y = null;
+    });
+
+    var observer = new IntersectionObserver(function (entries) {
+        entries.forEach(function (entry) {
             isVisible = entry.isIntersecting;
-            if (isVisible && !animationId) {
-                animate();
-            } else if (!isVisible && animationId) {
-                cancelAnimationFrame(animationId);
-                animationId = null;
+
+            if (isVisible) {
+                startAnimation();
+            } else {
+                stopAnimation();
             }
         });
     }, { threshold: 0.1 });
-    
+
     observer.observe(section);
-    
-    resize();
-    createParticles();
-    animate();
-    
-    window.addEventListener('resize', function() {
-        resize();
-        createParticles();
+
+    requestAnimationFrame(reinitParticles);
+    window.addEventListener('load', reinitParticles);
+    window.addEventListener('resize', reinitParticles);
+
+    var resizeObserver = new ResizeObserver(function () {
+        requestAnimationFrame(reinitParticles);
     });
+    resizeObserver.observe(section);
 })();
 
 (function() {
